@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: bbpro-signal-bot
+    env: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: CTRADER_ACCESS_TOKEN_2
+        sync: false
+      - key: CTRADER_CLIENT_ID_3
+        sync: false
+      - key: CTRADER_SECRET_4
+        sync: false
+      - key: CTRADER_ACCOUNT_ID
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: SIGNAL_ONLY_MODE
+        value: "true"
+      - key: PORT
+        value: "8080"
