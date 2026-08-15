@@ -184,7 +184,7 @@ logger = logging.getLogger("BBProSignal")
 class BollingerBreakoutSignalBot:
     """Signal-only bot — Ultimate Edition v3."""
 
-    def __init__(self, cfg: Optional[BotConfig] = None):
+    def __init__(self, cfg: Optional[BotConfig] = None, enable_commands: bool = True):
         self.cfg = cfg or DEFAULT_CONFIG
         self.client = CTraderClient(self.cfg)
         self.daily_state = DailyState()
@@ -293,9 +293,9 @@ class BollingerBreakoutSignalBot:
         if HAS_CORRELATION:
             self.correlation = CorrelationAnalyzer()
 
-        # Telegram command handler
+        # Telegram command handler (only one instance should poll to avoid 409 Conflict)
         self.cmd_handler: Optional[TelegramCommandHandler] = None
-        if HAS_TG_CMDS and self.cfg.telegram_enabled:
+        if enable_commands and HAS_TG_CMDS and self.cfg.telegram_enabled:
             self.cmd_handler = TelegramCommandHandler(
                 bot_token=self.cfg.telegram_bot_token,
                 chat_id=self.cfg.telegram_chat_id,
@@ -506,7 +506,7 @@ class BollingerBreakoutSignalBot:
         if not self.symbol_info:
             return False
         new_bars = await self.client.get_recent_bars(
-            self.cfg.symbol, self.cfg.timeframe, count=2
+            self.cfg.symbol, self.cfg.timeframe, count=5
         )
         if not new_bars:
             return False
@@ -517,7 +517,11 @@ class BollingerBreakoutSignalBot:
                 if truly_new:
                     self.bars.extend(truly_new)
                 else:
-                    self.bars = self.bars[:-1] + new_bars[-1:]
+                    # Same timestamp — update the last bar (still forming)
+                    if new_bars[-1].timestamp == self._last_bar_ts:
+                        self.bars[-1] = new_bars[-1]
+                    else:
+                        self.bars.append(new_bars[-1])
             else:
                 self.bars = list(new_bars)
 
@@ -526,6 +530,9 @@ class BollingerBreakoutSignalBot:
                 self.bars = self.bars[-max_window * 2:]
             self._last_bar_ts = latest_ts
             return True
+        elif latest_ts == self._last_bar_ts and self.bars:
+            # Update the last (forming) bar with latest prices
+            self.bars[-1] = new_bars[-1]
         return False
 
     # ------------------------------------------------------------------
@@ -647,15 +654,15 @@ class BollingerBreakoutSignalBot:
                 if strategy_results:
                     best = self.strategy_mgr.get_best_signal(strategy_results)
                     if best:
-                        best_signal = best.signal
-                        best_strategy = best.strategy
+                        best_signal = best.get("signal")
+                        best_strategy = best.get("strategy", "unknown")
 
                     # Consensus check
                     if self.cfg.require_consensus:
                         consensus = self.strategy_mgr.get_consensus(strategy_results)
                         if consensus:
-                            best_signal = consensus[0]
-                            best_strategy = f"consensus({consensus[1]})"
+                            best_signal = consensus.get("signal")
+                            best_strategy = f"consensus({consensus.get('strategy', 'unknown')})"
                         else:
                             if self.cfg.show_debug:
                                 logger.info("[%s] No strategy consensus", self.cfg.symbol)
@@ -665,13 +672,13 @@ class BollingerBreakoutSignalBot:
 
         # Filter strategies by market regime
         if regime_strategies and strategy_results:
-            filtered = [r for r in strategy_results if r.strategy in regime_strategies]
+            filtered = [r for r in strategy_results if r.get("strategy") in regime_strategies]
             if filtered:
                 strategy_results = filtered
                 best = self.strategy_mgr.get_best_signal(filtered)
                 if best:
-                    best_signal = best.signal
-                    best_strategy = best.strategy
+                    best_signal = best.get("signal")
+                    best_strategy = best.get("strategy", "unknown")
 
         # Determine direction to check
         if best_signal:
@@ -1202,7 +1209,7 @@ def _start_keepalive():
     t.start()
 
 
-async def run_symbol(symbol: str, web_enabled: bool = False):
+async def run_symbol(symbol: str, web_enabled: bool = False, enable_commands: bool = False):
     from config import load_config
     cfg = load_config()
     cfg.symbol = symbol
@@ -1213,7 +1220,7 @@ async def run_symbol(symbol: str, web_enabled: bool = False):
     if HAS_PROFILES:
         apply_profile(cfg, symbol)
 
-    bot = BollingerBreakoutSignalBot(cfg)
+    bot = BollingerBreakoutSignalBot(cfg, enable_commands=enable_commands)
     try:
         await bot.run()
     except Exception as e:
@@ -1241,7 +1248,7 @@ async def run_all_symbols():
         logger.warning("Failed to send combined startup message: %s", e)
 
     tasks = [
-        asyncio.create_task(run_symbol(sym, web_enabled=(i == 0)))
+        asyncio.create_task(run_symbol(sym, web_enabled=(i == 0), enable_commands=(i == 0)))
         for i, sym in enumerate(ALL_SYMBOLS)
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)

@@ -131,7 +131,9 @@ def rsi(close: np.ndarray, period: int = 14) -> np.ndarray:
     avg_gain = np.mean(gains[:period])
     avg_loss = np.mean(losses[:period])
 
-    if avg_loss == 0:
+    if avg_loss == 0 and avg_gain == 0:
+        out[period] = 50.0  # Flat market — neutral
+    elif avg_loss == 0:
         out[period] = 100.0
     else:
         rs = avg_gain / avg_loss
@@ -143,7 +145,9 @@ def rsi(close: np.ndarray, period: int = 14) -> np.ndarray:
         l = losses[i - 1]
         avg_gain = (avg_gain * (period - 1) + g) / period
         avg_loss = (avg_loss * (period - 1) + l) / period
-        if avg_loss == 0:
+        if avg_loss == 0 and avg_gain == 0:
+            out[i] = 50.0  # Flat market — neutral
+        elif avg_loss == 0:
             out[i] = 100.0
         else:
             rs = avg_gain / avg_loss
@@ -212,7 +216,7 @@ def calc_stochastic(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray,
         ll = np.min(sub_lows)
         diff = hh - ll
         if diff == 0:
-            raw_k[i] = 100.0
+            raw_k[i] = 50.0  # Flat market — neutral
         else:
             raw_k[i] = 100.0 * (closes[i] - ll) / diff
 
@@ -388,6 +392,11 @@ def compute_all_indicators(high: np.ndarray, low: np.ndarray, close: np.ndarray,
     ema_slow  = ema(close, cfg.slow_ema_period)
     atr_arr   = atr(high, low, close, cfg.atr_period)
 
+    # Compute additional indicators
+    stoch_k, stoch_d = calc_stochastic(high, low, close, getattr(cfg, "stoch_period", 14))
+    macd_line, macd_signal, macd_hist = calc_macd(close, getattr(cfg, "macd_fast", 12), getattr(cfg, "macd_slow", 26), getattr(cfg, "macd_signal_period", 9))
+    fib_levels = calc_fibonacci(float(np.max(high[-50:])), float(np.min(low[-50:])))
+
     return {
         "bb_mid":      bb_mid,
         "bb_upper":    bb_up,
@@ -397,6 +406,12 @@ def compute_all_indicators(high: np.ndarray, low: np.ndarray, close: np.ndarray,
         "ema_slow":    ema_slow,
         "atr":         atr_arr,
         "adx":         calc_adx(high, low, close, getattr(cfg, "adx_period", 14)),
+        "stoch_k":     stoch_k,
+        "stoch_d":     stoch_d,
+        "macd_line":   macd_line,
+        "macd_signal": macd_signal,
+        "macd_hist":   macd_hist,
+        "fib_levels":  fib_levels,
     }
 
 
