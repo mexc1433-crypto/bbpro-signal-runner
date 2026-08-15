@@ -432,7 +432,7 @@ async function closeAllTrades() {
 
 async function controlBot(action) {
   try {
-    const r = await fetch(\`/api/control/\${action}\`, { method: 'POST' });
+    const r = await fetch(`/api/control/${action}`, { method: 'POST' });
     if (r.ok) {
       await loadAccount();
     } else {
@@ -584,15 +584,15 @@ async function loadTrades() {
   tbody.innerHTML = trades.map(t => {
     const pnl = Number(t.pnl||0);
     const pts = Number(t.pips||0);
-    return \`<tr>
-      <td>\${fmtTime(t.close_time)}</td>
-      <td style="font-weight:700">\${t.symbol||'—'}</td>
-      <td><span class="badge \${t.side==='buy'?'buy':'sell'}">\${t.side==='buy'?'▲ شراء':'▼ بيع'}</span></td>
-      <td>\${t.volume||'—'}</td>
-      <td style="color:\${pts>=0?'var(--green)':'var(--red)'};">\${(pts>=0?'+':'')+fmt(pts,1)}</td>
-      <td style="color:\${pnl>=0?'var(--green)':'var(--red)'};font-weight:700">\${(pnl>=0?'+':'')+fmt(pnl,2)}</td>
-      <td style="color:var(--muted);font-size:11px">\${t.close_reason||'—'}</td>
-    </tr>\`;
+    return `<tr>
+      <td>${fmtTime(t.close_time)}</td>
+      <td style="font-weight:700">${t.symbol||'—'}</td>
+      <td><span class="badge ${t.side==='buy'?'buy':'sell'}">${t.side==='buy'?'▲ شراء':'▼ بيع'}</span></td>
+      <td>${t.volume||'—'}</td>
+      <td style="color:${pts>=0?'var(--green)':'var(--red)'};">${(pts>=0?'+':'')+fmt(pts,1)}</td>
+      <td style="color:${pnl>=0?'var(--green)':'var(--red)'};font-weight:700">${(pnl>=0?'+':'')+fmt(pnl,2)}</td>
+      <td style="color:var(--muted);font-size:11px">${t.close_reason||'—'}</td>
+    </tr>`;
   }).join('');
 }
 
@@ -613,15 +613,15 @@ async function loadOpenPositions() {
 
   tbody.innerHTML = openPositions.map(p => {
     const pnl = Number(p.pnl||0);
-    return \`<tr>
-      <td>\${fmtTime(p.open_time)}</td>
-      <td style="font-weight:700">\${p.symbol||'—'}</td>
-      <td><span class="badge \${p.side==='buy'?'buy':'sell'}">\${p.side==='buy'?'▲ شراء':'▼ بيع'}</span></td>
-      <td>\${p.volume||'—'}</td>
-      <td>\${fmt(p.entry_price, 5)}</td>
-      <td>\${fmt(p.current_price, 5)}</td>
-      <td style="color:\${pnl>=0?'var(--green)':'var(--red)'};font-weight:700">\${(pnl>=0?'+':'')+fmt(pnl,2)}</td>
-    </tr>\`;
+    return `<tr>
+      <td>${fmtTime(p.open_time)}</td>
+      <td style="font-weight:700">${p.symbol||'—'}</td>
+      <td><span class="badge ${p.side==='buy'?'buy':'sell'}">${p.side==='buy'?'▲ شراء':'▼ بيع'}</span></td>
+      <td>${p.volume||'—'}</td>
+      <td>${fmt(p.entry_price, 5)}</td>
+      <td>${fmt(p.current_price, 5)}</td>
+      <td style="color:${pnl>=0?'var(--green)':'var(--red)'};font-weight:700">${(pnl>=0?'+':'')+fmt(pnl,2)}</td>
+    </tr>`;
   }).join('');
 }
 
