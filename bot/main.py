@@ -46,7 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 
 from config import BotConfig, DEFAULT_CONFIG, TradeDirection, BreakoutMode
-from indicators import compute_all_indicators
+from indicators import compute_all_indicators, calc_fibonacci
 from filters import multi_layer_filter, parse_news_times, should_close_all_on_friday
 from risk_manager import calculate_sl_tp, DailyState, check_daily_reset
 from ctrader_client import CTraderClient, SymbolInfo, Bar
@@ -468,6 +468,26 @@ class BollingerBreakoutSignalBot:
                     if self.cfg.show_debug:
                         logger.info("[%s] Economic blackout: %s", self.cfg.symbol, reason)
                     return
+                # News pre-alert: notify about upcoming high-impact news
+                next_event = self.econ_cal.get_next_event(self.cfg.symbol)
+                if next_event:
+                    try:
+                        event_time = datetime.fromisoformat(next_event["time"].replace("Z", "+00:00"))
+                        if event_time.tzinfo is None:
+                            event_time = event_time.replace(tzinfo=timezone.utc)
+                        mins_until = (event_time - now_utc).total_seconds() / 60
+                        if 30 < mins_until < 45 and not self._pre_alert_sent.get(f"{self.cfg.symbol}_news"):
+                            self.notifier.send(
+                                f"📰 NEWS ALERT | {self.cfg.symbol}\n"
+                                f"⏰ {next_event.get('title', 'Economic Event')} in ~{int(mins_until)} min\n"
+                                f"🔑 Currency: {next_event.get('currency', 'N/A')}\n"
+                                f"⚠️ High impact — signals paused during release"
+                            )
+                            self._pre_alert_sent[f"{self.cfg.symbol}_news"] = True
+                        elif mins_until > 60:
+                            self._pre_alert_sent.pop(f"{self.cfg.symbol}_news", None)
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.warning("[%s] Econ calendar error: %s", self.cfg.symbol, e)
 
@@ -697,6 +717,54 @@ class BollingerBreakoutSignalBot:
             except Exception as e:
                 logger.warning("[%s] Divergence detection failed: %s", self.cfg.symbol, e)
 
+        # ── FVG Strategy Analysis ──────────────────────────────────────
+        fvg_result = None
+        if self.fvg_strategy:
+            try:
+                fvg_result = self.fvg_strategy.analyze(self.bars, self.cfg)
+                if fvg_result and fvg_result.get("signal"):
+                    logger.info("[%s] FVG signal: %s (conf=%.0f%%)",
+                                self.cfg.symbol, fvg_result.get("signal"),
+                                fvg_result.get("confidence", 0) * 100)
+            except Exception as e:
+                logger.warning("[%s] FVG analysis failed: %s", self.cfg.symbol, e)
+
+        # ── ICT Killzones Strategy ──────────────────────────────────────
+        ict_result = None
+        if self.ict_killzones:
+            try:
+                ict_result = self.ict_killzones.analyze(self.bars, self.cfg)
+                if ict_result and ict_result.get("signal"):
+                    logger.info("[%s] ICT Killzone signal: %s (conf=%.0f%%) zone=%s",
+                                self.cfg.symbol, ict_result.get("signal"),
+                                ict_result.get("confidence", 0) * 100,
+                                ict_result.get("killzone", "unknown"))
+            except Exception as e:
+                logger.warning("[%s] ICT Killzones failed: %s", self.cfg.symbol, e)
+
+        # ── Volume Profile Strategy ────────────────────────────────────
+        vp_result = None
+        if self.vol_profile:
+            try:
+                vp_result = self.vol_profile.analyze(self.bars, self.cfg)
+                if vp_result and vp_result.get("signal"):
+                    logger.info("[%s] Volume Profile signal: %s (conf=%.0f%%)",
+                                self.cfg.symbol, vp_result.get("signal"),
+                                vp_result.get("confidence", 0) * 100)
+            except Exception as e:
+                logger.warning("[%s] Volume Profile failed: %s", self.cfg.symbol, e)
+
+        # ── Fibonacci Retracement Levels ───────────────────────────────
+        fib_levels = None
+        try:
+            lookback = min(len(self.bars), 200)
+            recent_bars = self.bars[-lookback:]
+            fib_high = max(b.high for b in recent_bars)
+            fib_low = min(b.low for b in recent_bars)
+            fib_levels = calc_fibonacci(fib_high, fib_low)
+        except Exception as e:
+            logger.warning("[%s] Fibonacci calculation failed: %s", self.cfg.symbol, e)
+
         # Check directions
         for direction in directions_to_check:
             breakout = self._check_breakout(direction, close_now, close_prev,
@@ -855,6 +923,49 @@ class BollingerBreakoutSignalBot:
                     score += 5  # VWAP alignment bonus
                 vwap_text = self.vwap.format_for_signal(vwap_result, self.cfg.symbol)
 
+            # ── FVG confirmation bonus ────────────────────────────────────
+            fvg_text = ""
+            if fvg_result and fvg_result.get("signal"):
+                fvg_sig = fvg_result.get("signal")
+                if (fvg_sig == TradeDirection.BUY and direction == TradeDirection.BUY) or \
+                   (fvg_sig == TradeDirection.SELL and direction == TradeDirection.SELL):
+                    score += 8  # FVG alignment bonus
+                    fvg_text = f"📍 FVG: {fvg_result.get('reason', 'FVG entry')}"
+
+            # ── ICT Killzone confirmation bonus ───────────────────────────
+            ict_text = ""
+            if ict_result and ict_result.get("signal"):
+                ict_sig = ict_result.get("signal")
+                if (ict_sig == TradeDirection.BUY and direction == TradeDirection.BUY) or \
+                   (ict_sig == TradeDirection.SELL and direction == TradeDirection.SELL):
+                    score += 7  # ICT Killzone alignment bonus
+                    ict_text = f"⏰ ICT Killzone: {ict_result.get('killzone', 'active')} — {ict_result.get('reason', 'liquidity sweep')}"
+
+            # ── Volume Profile confirmation bonus ────────────────────────
+            vp_text = ""
+            if vp_result and vp_result.get("signal"):
+                vp_sig = vp_result.get("signal")
+                if (vp_sig == TradeDirection.BUY and direction == TradeDirection.BUY) or \
+                   (vp_sig == TradeDirection.SELL and direction == TradeDirection.SELL):
+                    score += 6  # Volume Profile alignment bonus
+                    vp_text = f"📊 Volume Profile: {vp_result.get('reason', 'VP confirmation')}"
+
+            # ── Fibonacci levels text ────────────────────────────────────
+            fib_text = ""
+            if fib_levels:
+                try:
+                    fib_text = (
+                        f"📐 Fibonacci Levels:\n"
+                        f"  0.0:   {fib_levels[0.0]:.5f}\n"
+                        f"  0.382: {fib_levels[0.382]:.5f}\n"
+                        f"  0.5:   {fib_levels[0.5]:.5f}\n"
+                        f"  0.618: {fib_levels[0.618]:.5f}\n"
+                        f"  0.786: {fib_levels[0.786]:.5f}\n"
+                        f"  1.0:   {fib_levels[1.0]:.5f}"
+                    )
+                except Exception:
+                    fib_text = ""
+
             # ── Divergence confirmation ──────────────────────────────────
             div_text = ""
             if div_result:
@@ -930,6 +1041,14 @@ class BollingerBreakoutSignalBot:
                 extra_parts.append(f"🎯 Multi-TP:\n{multi_tp_text}")
             if regime:
                 extra_parts.append(f"📊 Regime: {regime.regime} (ADX={regime.adx:.0f})")
+            if fvg_text:
+                extra_parts.append(fvg_text)
+            if ict_text:
+                extra_parts.append(ict_text)
+            if vp_text:
+                extra_parts.append(vp_text)
+            if fib_text:
+                extra_parts.append(fib_text)
             extra_text = "\n\n".join(extra_parts) if extra_parts else ""
 
             # ── SEND SIGNAL TO TELEGRAM ─────────────────────────────────
@@ -1116,7 +1235,7 @@ async def run_all_symbols():
             cfg.telegram_enabled,
         )
         # Count total strategies (8 available strategies, ~3-4 enabled per symbol)
-        total_strategies = 8  # breakout, rsi_reversal, ema_crossover, sr_bounce, bb_mean_reversion, macd, stochastic, adx
+        total_strategies = 11  # 8 core + FVG + ICT Killzones + Volume Profile
         notifier.send_startup_message(ALL_SYMBOLS, total_strategies)
     except Exception as e:
         logger.warning("Failed to send combined startup message: %s", e)

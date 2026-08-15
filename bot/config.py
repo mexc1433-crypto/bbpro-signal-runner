@@ -80,6 +80,7 @@ class BotConfig:
     #                     "fvg", "ict_killzones", "volume_profile"
     enabled_strategies: List[str] = field(default_factory=lambda: [
         "breakout", "rsi_reversal", "ema_crossover", "sr_bounce", "bb_mean_reversion",
+        "macd_crossover", "stochastic_reversal", "trend_adx",
         "fvg", "ict_killzones", "volume_profile"
     ])
     # Require 3+ strategies to agree before sending signal

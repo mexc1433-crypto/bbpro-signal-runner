@@ -4,7 +4,7 @@
 
 ## المميزات الكاملة
 
-### استراتيجيات التداول (8 استراتيجيات)
+### استراتيجيات التداول (11 استراتيجية)
 1. **BB Breakout** — اختراق بولينجر باند
 2. **RSI Reversal** — انعكاس RSI من التشبع
 3. **EMA Crossover** — تقاطع EMA 50/200 (Golden/Death Cross)
@@ -13,6 +13,9 @@
 6. **MACD Crossover** — تقاطع MACD
 7. **Stochastic Reversal** — انعكاس ستوكاستيك
 8. **Trend ADX** — تبعية التند القوي
+9. **FVG (Fair Value Gap)** — فجوات القيمة العادلة (ICT concept)
+10. **ICT Killzones** — مناطق القتل + جذب السيولة
+11. **Volume Profile** — تحليل توزيع الحجم
 
 ### تحليل متقدم
 - 🧠 **Smart Money Concepts (SMC)** — Order Blocks, FVG, BOS/CHoCH, Liquidity Sweeps
@@ -21,6 +24,10 @@
 - 📈 **RSI & MACD Divergence** — كشف الانعكاسات
 - 🎯 **Market Regime Detection** — trending/ranging/volatile/choppy
 - 📊 **VWAP** — Volume Weighted Average Price
+
+### مستويات فيبوناتشي
+- 📐 **Fibonacci Retracement** — مستويات 0, 23.6%, 38.2%, 50%, 61.8%, 78.6%, 100%
+- تضاف لكل إشارة لتحديد مستويات الدخول والخروج
 
 ### إدارة المخاطر
 - 📏 **Kelly Criterion** — حساب حجم الصفقة الأمثل

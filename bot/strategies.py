@@ -52,12 +52,12 @@ except ImportError:
         VolumeProfileStrategy = None
 
 try:
-    from ict_killzones import ICKillzoneStrategy
+    from ict_killzones import ICTKillzoneStrategy
 except ImportError:
     try:
-        from .ict_killzones import ICKillzoneStrategy
+        from .ict_killzones import ICTKillzoneStrategy
     except ImportError:
-        ICKillzoneStrategy = None
+        ICTKillzoneStrategy = None
 
 
 try:
@@ -936,8 +936,8 @@ class StrategyManager:
             self.strategies["ict_killzones"] = ICTKillzoneStrategy()
         if HAS_VP:
             self.strategies["volume_profile"] = VolumeProfileStrategy()
-        if ICKillzoneStrategy is not None:
-            self.strategies["ict_killzones"] = ICKillzoneStrategy()
+        if ICTKillzoneStrategy is not None:
+            self.strategies["ict_killzones"] = ICTKillzoneStrategy()
 
     def run_all(self, bars: Any, cfg: Optional[BotConfig] = None) -> List[Dict[str, Any]]:
         """

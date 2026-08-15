@@ -17,7 +17,7 @@ SYMBOL_PROFILES = {
         "min_adx": 20.0,
         "cooldown_minutes": 120,
         "min_rr_ratio": 1.5,
-        "strategies": ["breakout", "rsi_reversal", "sr_bounce", "bb_mean_reversion", "fvg", "ict_killzones"],
+        "strategies": ["breakout", "rsi_reversal", "ema_crossover", "sr_bounce", "bb_mean_reversion", "macd_crossover", "stochastic_reversal", "trend_adx", "fvg", "ict_killzones", "volume_profile"],
         "pip_size": 0.1,
     },
     "EURUSD": {
@@ -31,7 +31,7 @@ SYMBOL_PROFILES = {
         "min_adx": 25.0,
         "cooldown_minutes": 90,
         "min_rr_ratio": 1.5,
-        "strategies": ["breakout", "ema_crossover", "rsi_reversal", "fvg", "ict_killzones", "volume_profile"],
+        "strategies": ["breakout", "rsi_reversal", "ema_crossover", "sr_bounce", "bb_mean_reversion", "macd_crossover", "stochastic_reversal", "trend_adx", "fvg", "ict_killzones", "volume_profile"],
         "pip_size": 0.0001,
     },
     "GBPUSD": {
@@ -45,7 +45,7 @@ SYMBOL_PROFILES = {
         "min_adx": 22.0,
         "cooldown_minutes": 90,
         "min_rr_ratio": 1.5,
-        "strategies": ["breakout", "rsi_reversal", "sr_bounce", "bb_mean_reversion", "fvg", "ict_killzones"],
+        "strategies": ["breakout", "rsi_reversal", "ema_crossover", "sr_bounce", "bb_mean_reversion", "macd_crossover", "stochastic_reversal", "trend_adx", "fvg", "ict_killzones", "volume_profile"],
         "pip_size": 0.0001,
     },
     "USDJPY": {
@@ -59,7 +59,7 @@ SYMBOL_PROFILES = {
         "min_adx": 25.0,
         "cooldown_minutes": 90,
         "min_rr_ratio": 1.5,
-        "strategies": ["breakout", "ema_crossover", "rsi_reversal", "fvg", "ict_killzones"],
+        "strategies": ["breakout", "rsi_reversal", "ema_crossover", "sr_bounce", "bb_mean_reversion", "macd_crossover", "stochastic_reversal", "trend_adx", "fvg", "ict_killzones", "volume_profile"],
         "pip_size": 0.01,
     },
     "EURJPY": {
@@ -73,7 +73,7 @@ SYMBOL_PROFILES = {
         "min_adx": 22.0,
         "cooldown_minutes": 100,
         "min_rr_ratio": 1.5,
-        "strategies": ["breakout", "sr_bounce", "rsi_reversal", "fvg", "ict_killzones"],
+        "strategies": ["breakout", "rsi_reversal", "ema_crossover", "sr_bounce", "bb_mean_reversion", "macd_crossover", "stochastic_reversal", "trend_adx", "fvg", "ict_killzones", "volume_profile"],
         "pip_size": 0.01,
     },
     "USDCAD": {
@@ -87,7 +87,7 @@ SYMBOL_PROFILES = {
         "min_adx": 25.0,
         "cooldown_minutes": 90,
         "min_rr_ratio": 1.5,
-        "strategies": ["breakout", "ema_crossover", "rsi_reversal", "fvg", "volume_profile"],
+        "strategies": ["breakout", "rsi_reversal", "ema_crossover", "sr_bounce", "bb_mean_reversion", "macd_crossover", "stochastic_reversal", "trend_adx", "fvg", "ict_killzones", "volume_profile"],
         "pip_size": 0.0001,
     },
 }
@@ -103,7 +103,7 @@ DEFAULT_PROFILE = {
     "min_adx": 25.0,
     "cooldown_minutes": 120,
     "min_rr_ratio": 1.5,
-    "strategies": ["breakout", "rsi_reversal", "ema_crossover", "fvg", "ict_killzones"],
+    "strategies": ["breakout", "rsi_reversal", "ema_crossover", "sr_bounce", "bb_mean_reversion", "macd_crossover", "stochastic_reversal", "trend_adx", "fvg", "ict_killzones", "volume_profile"],
     "pip_size": 0.0001,
 }
 
