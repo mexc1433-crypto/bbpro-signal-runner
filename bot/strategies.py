@@ -351,7 +351,7 @@ class SupportResistanceStrategy:
     SELL: Price bounces off resistance with bearish rejection (pinbar or bearish close)
     """
 
-    def __init__(self, name: str = "support_resistance", lookback: int = 80, tolerance: float = 0.002):
+    def __init__(self, name: str = "sr_bounce", lookback: int = 80, tolerance: float = 0.002):
         self.name = name
         self.lookback = lookback
         self.tolerance = tolerance
@@ -923,7 +923,7 @@ class StrategyManager:
             "breakout": BreakoutStrategy(),
             "rsi_reversal": RSIReversalStrategy(),
             "ema_crossover": EMACrossoverStrategy(),
-            "support_resistance": SupportResistanceStrategy(),
+            "sr_bounce": SupportResistanceStrategy(),
             "bb_mean_reversion": BBMeanReversionStrategy(),
             "macd_crossover": MACDCrossoverStrategy(),
             "stochastic_reversal": StochasticReversalStrategy(),
@@ -936,8 +936,6 @@ class StrategyManager:
             self.strategies["ict_killzones"] = ICTKillzoneStrategy()
         if HAS_VP:
             self.strategies["volume_profile"] = VolumeProfileStrategy()
-        if ICTKillzoneStrategy is not None:
-            self.strategies["ict_killzones"] = ICTKillzoneStrategy()
 
     def run_all(self, bars: Any, cfg: Optional[BotConfig] = None) -> List[Dict[str, Any]]:
         """
