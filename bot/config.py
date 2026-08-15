@@ -64,6 +64,7 @@ class BotConfig:
     # ── NEW: Signal cooldown ──────────────────────────────────────────────
     # Minimum minutes between signals for the same symbol
     cooldown_minutes: int = 120
+    max_daily_signals: int = 4  # max signals per symbol per day
 
     # ── NEW: Risk:Reward ratio enforcement ─────────────────────────────────
     # Minimum R:R ratio (1.5 = TP must be 1.5x the SL distance)
@@ -85,8 +86,8 @@ class BotConfig:
         "scalping", "news_trading", "pairs_trading"
     ])
     # Require 3+ strategies to agree before sending signal
-    require_consensus: bool = False
-    min_consensus_count: int = 2
+    require_consensus: bool = True
+    min_consensus_count: int = 3
 
     # ── NEW: Advanced strategies config ────────────────────────────────────
     enable_ict_killzones: bool = True
@@ -97,7 +98,7 @@ class BotConfig:
 
     # ── NEW: Multi-timeframe confluence ───────────────────────────────────
     enable_multi_tf: bool = True
-    min_tf_confluence: float = 50.0  # minimum % agreement
+    min_tf_confluence: float = 60.0  # minimum % agreement
     mtf_timeframes: List[str] = field(default_factory=lambda: ["m15", "m30", "h1", "h4"])
 
     # ── NEW: Candlestick pattern confirmation ──────────────────────────────
@@ -348,12 +349,13 @@ def load_config() -> BotConfig:
 
     # ── NEW: Load extended config from env ────────────────────────────────
     cfg.cooldown_minutes = int(os.environ.get('COOLDOWN_MINUTES', '120'))
+    cfg.max_daily_signals = int(os.environ.get('MAX_DAILY_SIGNALS', '4'))
     cfg.min_rr_ratio = float(os.environ.get('MIN_RR_RATIO', '1.5'))
     cfg.signal_expiry_bars = int(os.environ.get('SIGNAL_EXPIRY_BARS', '48'))
-    cfg.require_consensus = os.environ.get('REQUIRE_CONSENSUS', 'false').strip().lower() == 'true'
-    cfg.min_consensus_count = int(os.environ.get('MIN_CONSENSUS', '2'))
+    cfg.require_consensus = os.environ.get('REQUIRE_CONSENSUS', 'true').strip().lower() == 'true'
+    cfg.min_consensus_count = int(os.environ.get('MIN_CONSENSUS', '3'))
     cfg.enable_multi_tf = os.environ.get('ENABLE_MTF', 'true').strip().lower() != 'false'
-    cfg.min_tf_confluence = float(os.environ.get('MIN_TF_CONFLUENCE', '50'))
+    cfg.min_tf_confluence = float(os.environ.get('MIN_TF_CONFLUENCE', '60'))
     cfg.enable_candlestick_confirm = os.environ.get('ENABLE_CANDLESTICK', 'true').strip().lower() != 'false'
     cfg.enable_economic_calendar = os.environ.get('ENABLE_ECON_CAL', 'true').strip().lower() != 'false'
     cfg.enable_pre_signal_alert = os.environ.get('ENABLE_PRE_SIGNAL', 'true').strip().lower() != 'false'

@@ -157,7 +157,7 @@ def multi_layer_filter(side: str, indicators: dict) -> dict:
     score  = int((passed / total) * 100)
 
     # Need at least 3/5 soft checks to pass (score >= 60)
-    decision = (score >= 60)
+    decision = (score >= 80)  # Need 4/5 soft checks
 
     if decision:
         logger.info("Signal PASSED: score=%d/100 (%d/%d soft checks) side=%s", score, passed, total, side)

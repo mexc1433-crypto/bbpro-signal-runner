@@ -565,6 +565,12 @@ class BollingerBreakoutSignalBot:
         if self._kill_switch_active:
             return
 
+        # Daily signal limit check
+        if self._daily_signal_count >= getattr(self.cfg, 'max_daily_signals', 4):
+            if self.cfg.show_debug:
+                logger.info("[%s] Daily signal limit reached (%d/%d)", self.cfg.symbol, self._daily_signal_count, self.cfg.max_daily_signals)
+            return
+
         # Cooldown check
         if self._is_in_cooldown(self.cfg.symbol, now_utc):
             if self.cfg.show_debug:
@@ -924,7 +930,7 @@ class BollingerBreakoutSignalBot:
                         ai_verdict = ai_result.verdict
                         ai_reasoning = ai_result.reasoning
 
-                        ai_min = int(os.environ.get("AI_MIN_CONFIDENCE", "60"))
+                        ai_min = int(os.environ.get("AI_MIN_CONFIDENCE", "65"))
                         if ai_result.confidence < ai_min:
                             logger.info("[%s] AI rejected: %d%% < %d%%", self.cfg.symbol, ai_result.confidence, ai_min)
                             continue
@@ -1025,7 +1031,7 @@ class BollingerBreakoutSignalBot:
                     quality_text = f"Quality: {quality.grade} ({quality.score:.0f}/100) — {quality.recommendation}"
 
                     # Skip low-quality signals
-                    if quality.score < 40:
+                    if quality.score < int(os.environ.get("MIN_QUALITY_SCORE", "60")):
                         logger.info("[%s] Signal quality too low: %.0f (%s)", self.cfg.symbol, quality.score, quality.grade)
                         continue
                 except Exception as e:
