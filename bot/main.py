@@ -136,6 +136,12 @@ except ImportError:
     HAS_REGIME = False
 
 try:
+    from session_awareness import SessionAwareness
+    HAS_SESSION = True
+except ImportError:
+    HAS_SESSION = False
+
+try:
     from divergence import DivergenceDetector
     HAS_DIVERGENCE = True
 except ImportError:
@@ -272,6 +278,11 @@ class BollingerBreakoutSignalBot:
         if HAS_REGIME:
             self.regime_detector = MarketRegimeDetector()
 
+        # ── NEW: Session Awareness ────────────────────────────────────────
+        self.session_aware: Optional[SessionAwareness] = None
+        if HAS_SESSION and getattr(cfg, 'enable_session_awareness', True):
+            self.session_aware = SessionAwareness()
+
         self.divergence: Optional[DivergenceDetector] = None
         if HAS_DIVERGENCE:
             self.divergence = DivergenceDetector()
@@ -324,6 +335,15 @@ class BollingerBreakoutSignalBot:
         if HAS_ICT_STRAT: features.append("ICT-Killzones")
         if HAS_VP_STRAT: features.append("VolProfile")
         if HAS_CORRELATION: features.append("Correlation")
+        if HAS_SESSION: features.append("SessionAware")
+        if getattr(self.cfg, 'enable_dxy_filter', False): features.append("DXYFilter")
+        if getattr(self.cfg, 'enable_scalping', False): features.append("Scalping")
+        if getattr(self.cfg, 'enable_news_trading', False): features.append("NewsTrade")
+        if getattr(self.cfg, 'enable_pairs_trading', False): features.append("PairsTrade")
+        if getattr(self.cfg, 'enable_dynamic_cooldown', False): features.append("DynCooldown")
+        if getattr(self.cfg, 'enable_position_sizing', False): features.append("PosSizing")
+        if getattr(self.cfg, 'enable_trailing_stop_suggestion', False): features.append("TrailStop")
+        if getattr(self.cfg, 'enable_multi_entry', False): features.append("MultiEntry")
         self._features = features
 
     # ------------------------------------------------------------------
@@ -1056,6 +1076,66 @@ class BollingerBreakoutSignalBot:
                 extra_parts.append(vp_text)
             if fib_text:
                 extra_parts.append(fib_text)
+
+            # ── NEW: Session awareness info ─────────────────────────────
+            session_text = ""
+            if self.session_aware:
+                try:
+                    session_info = self.session_aware.get_active_session()
+                    strategy_weights = self.session_aware.get_strategy_weights(session_info.get("session", "unknown"))
+                    session_bonus = self.session_aware.get_session_bonus(session_info.get("session", "unknown"))
+                    high_vol = self.session_aware.is_high_volatility_session(session_info.get("session", "unknown"))
+                    session_text = (
+                        f"🕐 Session: {session_info.get('session', 'Unknown')} ({session_info.get('hour', 0):02d}:00 UTC)"
+                        f"{' | HIGH VOLATILITY' if high_vol else ''}"
+                        f" | Bonus: +{session_bonus:.0f}%"
+                    )
+                    extra_parts.append(session_text)
+                except Exception as e:
+                    logger.warning("[%s] Session awareness failed: %s", self.cfg.symbol, e)
+
+            # ── NEW: Trailing stop suggestion ───────────────────────────
+            if self.risk_pro and getattr(self.cfg, 'enable_trailing_stop_suggestion', True):
+                try:
+                    ts_data = self.risk_pro.calculate_trailing_stop(
+                        entry=close_now, sl_price=sl_tp.sl_price, side=side,
+                        atr_value=atr_now, pip_size=self.symbol_info.pip_size,
+                    )
+                    ts_text = self.risk_pro.format_trailing_stop(ts_data, self.cfg.symbol)
+                    if ts_text:
+                        extra_parts.append(ts_text)
+                except Exception as e:
+                    logger.warning("[%s] Trailing stop suggestion failed: %s", self.cfg.symbol, e)
+
+            # ── NEW: Multi-entry suggestion ─────────────────────────────
+            if self.risk_pro and getattr(self.cfg, 'enable_multi_entry', True):
+                try:
+                    me_data = self.risk_pro.calculate_multi_entry(
+                        entry=close_now, side=side, atr_value=atr_now,
+                        pip_size=self.symbol_info.pip_size,
+                    )
+                    me_text = self.risk_pro.format_multi_entry(me_data, self.cfg.symbol)
+                    if me_text:
+                        extra_parts.append(me_text)
+                except Exception as e:
+                    logger.warning("[%s] Multi-entry suggestion failed: %s", self.cfg.symbol, e)
+
+            # ── NEW: Position sizing suggestion ──────────────────────────
+            if self.risk_pro and getattr(self.cfg, 'enable_position_sizing', True):
+                try:
+                    balance = getattr(self.cfg, 'default_account_balance', 10000.0)
+                    ps_data = self.risk_pro.calculate_position_size(
+                        account_balance=balance,
+                        risk_percent=getattr(self.cfg, 'default_risk_percent', 1.0),
+                        sl_pips=sl_tp.sl_pips,
+                        pip_value=self.symbol_info.pip_value_per_unit,
+                    )
+                    ps_text = self.risk_pro.format_position_size(ps_data, self.cfg.symbol)
+                    if ps_text:
+                        extra_parts.append(ps_text)
+                except Exception as e:
+                    logger.warning("[%s] Position sizing failed: %s", self.cfg.symbol, e)
+
             extra_text = "\n\n".join(extra_parts) if extra_parts else ""
 
             # ── SEND SIGNAL TO TELEGRAM ─────────────────────────────────
@@ -1141,19 +1221,63 @@ class BollingerBreakoutSignalBot:
     # ------------------------------------------------------------------
     #  COOLDOWN HELPERS
     # ------------------------------------------------------------------
+    def _get_dynamic_cooldown(self) -> float:
+        """Calculate dynamic cooldown based on current market volatility."""
+        if not getattr(self.cfg, 'enable_dynamic_cooldown', False):
+            return self.cfg.cooldown_minutes
+
+        try:
+            import numpy as np
+            closes = np.array([b.close for b in self.bars[-20:]] if len(self.bars) >= 20 else [b.close for b in self.bars])
+            if len(closes) < 5:
+                return self.cfg.cooldown_minutes
+
+            # Calculate current volatility (std dev of recent returns)
+            returns = np.diff(closes) / closes[:-1]
+            current_vol = float(np.std(returns))
+
+            # Calculate average volatility over longer period
+            long_closes = np.array([b.close for b in self.bars[-50:]] if len(self.bars) >= 50 else closes)
+            if len(long_closes) > 5:
+                long_returns = np.diff(long_closes) / long_closes[:-1]
+                avg_vol = float(np.std(long_returns))
+            else:
+                avg_vol = current_vol
+
+            if avg_vol > 0:
+                vol_ratio = current_vol / avg_vol
+            else:
+                vol_ratio = 1.0
+
+            # High volatility → shorter cooldown (more opportunities)
+            # Low volatility → longer cooldown (fewer opportunities, avoid noise)
+            if vol_ratio > 1.5:
+                cooldown = getattr(self.cfg, 'cooldown_high_volatility', 60)
+            elif vol_ratio < 0.7:
+                cooldown = getattr(self.cfg, 'cooldown_low_volatility', 180)
+            else:
+                cooldown = self.cfg.cooldown_minutes
+
+            if self.cfg.show_debug:
+                logger.info("[%s] Dynamic cooldown: %d min (vol_ratio=%.2f)", self.cfg.symbol, cooldown, vol_ratio)
+            return cooldown
+        except Exception as e:
+            logger.warning("Dynamic cooldown calculation failed: %s", e)
+            return self.cfg.cooldown_minutes
+
     def _is_in_cooldown(self, symbol: str, now: datetime) -> bool:
         last = self._last_signal_time.get(symbol)
         if not last:
             return False
         elapsed = (now - last).total_seconds() / 60
-        return elapsed < self.cfg.cooldown_minutes
+        return elapsed < self._get_dynamic_cooldown()
 
     def _cooldown_remaining(self, symbol: str, now: datetime) -> float:
         last = self._last_signal_time.get(symbol)
         if not last:
             return 0
         elapsed = (now - last).total_seconds() / 60
-        return max(0, self.cfg.cooldown_minutes - elapsed)
+        return max(0, self._get_dynamic_cooldown() - elapsed)
 
     # ------------------------------------------------------------------
     #  BREAKOUT DETECTION
@@ -1242,7 +1366,7 @@ async def run_all_symbols():
             cfg.telegram_enabled,
         )
         # Count total strategies (8 available strategies, ~3-4 enabled per symbol)
-        total_strategies = 11  # 8 core + FVG + ICT Killzones + Volume Profile
+        total_strategies = 14  # 8 core + FVG + ICT Killzones + Volume Profile + Scalping + News Trading + Pairs Trading
         notifier.send_startup_message(ALL_SYMBOLS, total_strategies)
     except Exception as e:
         logger.warning("Failed to send combined startup message: %s", e)

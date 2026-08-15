@@ -81,7 +81,8 @@ class BotConfig:
     enabled_strategies: List[str] = field(default_factory=lambda: [
         "breakout", "rsi_reversal", "ema_crossover", "sr_bounce", "bb_mean_reversion",
         "macd_crossover", "stochastic_reversal", "trend_adx",
-        "fvg", "ict_killzones", "volume_profile"
+        "fvg", "ict_killzones", "volume_profile",
+        "scalping", "news_trading", "pairs_trading"
     ])
     # Require 3+ strategies to agree before sending signal
     require_consensus: bool = False
@@ -235,6 +236,55 @@ class BotConfig:
     symbols: List[str] = field(default_factory=lambda: ['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'EURJPY', 'USDCAD'])
     multi_symbol_mode: bool = True
 
+    # ── NEW: Scalping strategy ──────────────────────────────────────────
+    enable_scalping: bool = True
+    scalping_stoch_oversold: float = 20.0
+    scalping_stoch_overbought: float = 80.0
+    scalping_sl_atr_mult: float = 1.5
+    scalping_tp_atr_mult: float = 1.0
+    scalping_min_confirmations: int = 3
+
+    # ── NEW: News trading strategy ─────────────────────────────────────
+    enable_news_trading: bool = True
+    news_trading_lookback_bars: int = 20
+    news_trading_atr_multiplier: float = 1.5
+    news_trading_body_multiplier: float = 2.0
+    news_trading_pre_minutes: int = 15
+    news_trading_post_minutes: int = 30
+
+    # ── NEW: Pairs trading / Statistical arbitrage ──────────────────────
+    enable_pairs_trading: bool = True
+    pairs_trading_correlation_threshold: float = 0.7
+    pairs_trading_zscore_threshold: float = 2.0
+    pairs_trading_lookback: int = 50
+    pairs_trading_symbols: List[List[str]] = field(default_factory=lambda: [
+        ["XAUUSD", "XAGUSD"], ["EURUSD", "GBPUSD"], ["USDJPY", "EURJPY"]
+    ])
+
+    # ── NEW: Session awareness ─────────────────────────────────────────
+    enable_session_awareness: bool = True
+    session_bonus_max: float = 15.0
+    enable_dxy_filter: bool = True
+
+    # ── NEW: Dynamic cooldown ───────────────────────────────────────────
+    enable_dynamic_cooldown: bool = True
+    cooldown_high_volatility: int = 60
+    cooldown_low_volatility: int = 180
+
+    # ── NEW: Position sizing in signal ──────────────────────────────────
+    enable_position_sizing: bool = True
+    default_risk_percent: float = 1.0
+    default_account_balance: float = 10000.0
+
+    # ── NEW: Trailing stop suggestion ──────────────────────────────────
+    enable_trailing_stop_suggestion: bool = True
+    trailing_stop_atr_mult: float = 1.5
+    trailing_stop_activation_mult: float = 1.0
+
+    # ── NEW: Multi-entry suggestion ────────────────────────────────────
+    enable_multi_entry: bool = True
+    multi_entry_levels: int = 3
+
     @property
     def hostname(self):
         return self.host
@@ -310,6 +360,18 @@ def load_config() -> BotConfig:
     cfg.enable_daily_report = os.environ.get('ENABLE_DAILY_REPORT', 'true').strip().lower() != 'false'
     cfg.enable_sr_levels = os.environ.get('ENABLE_SR_LEVELS', 'true').strip().lower() != 'false'
     cfg.enable_inline_buttons = os.environ.get('ENABLE_INLINE_BUTTONS', 'true').strip().lower() != 'false'
+
+    # ── NEW: Load new strategy config from env ─────────────────────────
+    cfg.enable_scalping = os.environ.get('ENABLE_SCALPING', 'true').strip().lower() != 'false'
+    cfg.enable_news_trading = os.environ.get('ENABLE_NEWS_TRADING', 'true').strip().lower() != 'false'
+    cfg.enable_pairs_trading = os.environ.get('ENABLE_PAIRS_TRADING', 'true').strip().lower() != 'false'
+    cfg.enable_session_awareness = os.environ.get('ENABLE_SESSION_AWARENESS', 'true').strip().lower() != 'false'
+    cfg.enable_dxy_filter = os.environ.get('ENABLE_DXY_FILTER', 'true').strip().lower() != 'false'
+    cfg.enable_dynamic_cooldown = os.environ.get('ENABLE_DYNAMIC_COOLDOWN', 'true').strip().lower() != 'false'
+    cfg.enable_position_sizing = os.environ.get('ENABLE_POSITION_SIZING', 'true').strip().lower() != 'false'
+    cfg.enable_trailing_stop_suggestion = os.environ.get('ENABLE_TRAILING_STOP', 'true').strip().lower() != 'false'
+    cfg.enable_multi_entry = os.environ.get('ENABLE_MULTI_ENTRY', 'true').strip().lower() != 'false'
+    cfg.default_account_balance = float(os.environ.get('ACCOUNT_BALANCE', '10000'))
 
     return cfg
 

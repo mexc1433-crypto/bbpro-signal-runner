@@ -78,6 +78,25 @@ try:
 except ImportError:
     HAS_VP = False
 
+# ── NEW: Scalping, News Trading, Pairs Trading ──────────────────────────
+try:
+    from scalping import ScalpingStrategy
+    HAS_SCALPING = True
+except ImportError:
+    HAS_SCALPING = False
+
+try:
+    from news_trading import NewsTradingStrategy
+    HAS_NEWS = True
+except ImportError:
+    HAS_NEWS = False
+
+try:
+    from pairs_trading import PairsTradingStrategy
+    HAS_PAIRS = True
+except ImportError:
+    HAS_PAIRS = False
+
 
 logger = logging.getLogger(__name__)
 
@@ -936,6 +955,12 @@ class StrategyManager:
             self.strategies["ict_killzones"] = ICTKillzoneStrategy()
         if HAS_VP:
             self.strategies["volume_profile"] = VolumeProfileStrategy()
+        # ── NEW strategies ──────────────────────────────────────────────
+        if HAS_SCALPING:
+            self.strategies["scalping"] = ScalpingStrategy()
+        if HAS_NEWS:
+            self.strategies["news_trading"] = NewsTradingStrategy()
+        # PairsTradingStrategy needs a client, added dynamically in main.py
 
     def run_all(self, bars: Any, cfg: Optional[BotConfig] = None) -> List[Dict[str, Any]]:
         """

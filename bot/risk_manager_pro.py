@@ -9,6 +9,9 @@ Professional risk management with:
   - Signal quality score (0-100)
   - Volatility-adjusted SL/TP
   - Maximum drawdown protection
+  - Trailing stop calculation
+  - Multi-entry scaling strategy
+  - Position size calculation & Telegram formatting
 
 This is for SIGNAL MODE — it calculates and suggests, doesn't execute.
 """
@@ -311,4 +314,195 @@ class RiskManagerPro:
             f"TP1: {mtp.tp1_price:{fmt}} (30%)\n"
             f"TP2: {mtp.tp2_price:{fmt}} (30%)\n"
             f"TP3: {mtp.tp3_price:{fmt}} (40%)"
+        )
+
+    # ------------------------------------------------------------------
+    # TRAILING STOP CALCULATION
+    # ------------------------------------------------------------------
+    def calculate_trailing_stop(self, entry: float, sl_price: float,
+                                side: str, atr_value: float,
+                                pip_size: float) -> Dict:
+        """
+        Calculate trailing stop parameters:
+          - Initial SL: sl_price
+          - Activation price: when price moves 1x ATR in favor
+          - Trailing distance: 1.5x ATR (in pips)
+          - Step size: 0.5x ATR
+        """
+        is_buy = side.lower() == "buy"
+
+        if is_buy:
+            activation_price = entry + (1.0 * atr_value)
+        else:
+            activation_price = entry - (1.0 * atr_value)
+
+        trailing_distance = (1.5 * atr_value) / pip_size if pip_size > 0 else (1.5 * atr_value)
+        step_size = (0.5 * atr_value) / pip_size if pip_size > 0 else (0.5 * atr_value)
+
+        return {
+            "initial_sl": sl_price,
+            "activation_price": activation_price,
+            "trailing_distance": trailing_distance,
+            "step_size": step_size,
+        }
+
+    # ------------------------------------------------------------------
+    # MULTI-ENTRY CALCULATION
+    # ------------------------------------------------------------------
+    def calculate_multi_entry(self, entry: float, side: str,
+                              atr_value: float, pip_size: float,
+                              levels: int = 3,
+                              sl_price: Optional[float] = None,
+                              tp_price: Optional[float] = None) -> Dict:
+        """
+        Calculate 3 entry levels and weighted average SL/TP:
+          - Entry 1: Current price (30% position)
+          - Entry 2: 0.5x ATR retracement (30% position)
+          - Entry 3: 1.0x ATR retracement (40% position)
+        """
+        is_buy = side.lower() == "buy"
+
+        if is_buy:
+            e1 = entry
+            e2 = entry - (0.5 * atr_value)
+            e3 = entry - (1.0 * atr_value)
+        else:
+            e1 = entry
+            e2 = entry + (0.5 * atr_value)
+            e3 = entry + (1.0 * atr_value)
+
+        entries = [e1, e2, e3]
+
+        p1 = 0.0
+        p2 = (0.5 * atr_value) / pip_size if pip_size > 0 else (0.5 * atr_value)
+        p3 = (1.0 * atr_value) / pip_size if pip_size > 0 else (1.0 * atr_value)
+        entries_pips = [p1, p2, p3]
+
+        weighted_entry = 0.30 * e1 + 0.30 * e2 + 0.40 * e3
+
+        if sl_price is not None:
+            sl_dist = abs(entry - sl_price)
+        else:
+            sl_dist = 1.5 * atr_value
+
+        if tp_price is not None:
+            tp_dist = abs(entry - tp_price)
+        else:
+            tp_dist = 2.0 * atr_value
+
+        if is_buy:
+            weighted_sl = weighted_entry - sl_dist
+            weighted_tp = weighted_entry + tp_dist
+        else:
+            weighted_sl = weighted_entry + sl_dist
+            weighted_tp = weighted_entry - tp_dist
+
+        return {
+            "entries": entries,
+            "entries_pips": entries_pips,
+            "weighted_entry": weighted_entry,
+            "weighted_sl": weighted_sl,
+            "weighted_tp": weighted_tp,
+        }
+
+    # ------------------------------------------------------------------
+    # POSITION SIZE CALCULATION
+    # ------------------------------------------------------------------
+    def calculate_position_size(self, account_balance: float,
+                                risk_percent: float = 1.0,
+                                sl_pips: float = 20.0,
+                                pip_value: float = 1.0) -> Dict:
+        """
+        Calculate position size based on account balance and risk %:
+          - Default risk: 1% of account balance
+          - Position size = (balance * risk_percent) / (sl_pips * pip_value)
+        """
+        if risk_percent > 1.0:
+            risk_decimal = risk_percent / 100.0
+            display_pct = risk_percent
+        elif risk_percent <= 0.05:
+            risk_decimal = risk_percent
+            display_pct = risk_percent * 100.0
+        else:
+            risk_decimal = 0.01 if risk_percent == 1.0 else risk_percent
+            display_pct = 1.0 if risk_percent == 1.0 else risk_percent
+
+        risk_amount = account_balance * risk_decimal
+
+        denom = sl_pips * pip_value
+        if denom > 0:
+            pos_size = risk_amount / denom
+        else:
+            pos_size = 0.0
+
+        units = pos_size * 100000.0
+
+        return {
+            "position_size": pos_size,
+            "units": units,
+            "risk_amount": risk_amount,
+            "risk_percent": display_pct,
+        }
+
+    # ------------------------------------------------------------------
+    # FORMAT TRAILING STOP FOR TELEGRAM
+    # ------------------------------------------------------------------
+    def format_trailing_stop(self, ts_data: Dict, symbol: str) -> str:
+        """Returns formatted trailing stop text for Telegram message."""
+        fmt = ".2f" if ("XAU" in symbol.upper() or "GOLD" in symbol.upper()) else ".4f" if "JPY" not in symbol.upper() else ".3f"
+        initial_sl = ts_data.get("initial_sl", 0.0)
+        activation = ts_data.get("activation_price", 0.0)
+        distance = ts_data.get("trailing_distance", 0.0)
+        step = ts_data.get("step_size", 0.0)
+
+        return (
+            f"🎯 Trailing Stop:\n"
+            f"• Initial SL: {initial_sl:{fmt}}\n"
+            f"• Activation Price: {activation:{fmt}}\n"
+            f"• Trailing Distance: {distance:.1f} pips\n"
+            f"• Step Size: {step:.1f} pips"
+        )
+
+    # ------------------------------------------------------------------
+    # FORMAT MULTI-ENTRY FOR TELEGRAM
+    # ------------------------------------------------------------------
+    def format_multi_entry(self, me_data: Dict, symbol: str) -> str:
+        """Returns formatted multi-entry text for Telegram message."""
+        fmt = ".2f" if ("XAU" in symbol.upper() or "GOLD" in symbol.upper()) else ".4f" if "JPY" not in symbol.upper() else ".3f"
+        entries = me_data.get("entries", [])
+        entries_pips = me_data.get("entries_pips", [])
+        w_sl = me_data.get("weighted_sl", 0.0)
+        w_tp = me_data.get("weighted_tp", 0.0)
+
+        e1 = f"{entries[0]:{fmt}}" if len(entries) > 0 else "N/A"
+        e2 = f"{entries[1]:{fmt}}" if len(entries) > 1 else "N/A"
+        e3 = f"{entries[2]:{fmt}}" if len(entries) > 2 else "N/A"
+
+        p2 = entries_pips[1] if len(entries_pips) > 1 else 0.0
+        p3 = entries_pips[2] if len(entries_pips) > 2 else 0.0
+
+        return (
+            f"📥 Multi-Entry Strategy:\n"
+            f"• Entry 1 (30%): {e1} (Current)\n"
+            f"• Entry 2 (30%): {e2} ({p2:.1f} pips retrace)\n"
+            f"• Entry 3 (40%): {e3} ({p3:.1f} pips retrace)\n"
+            f"• Weighted SL: {w_sl:{fmt}}\n"
+            f"• Weighted TP: {w_tp:{fmt}}"
+        )
+
+    # ------------------------------------------------------------------
+    # FORMAT POSITION SIZE FOR TELEGRAM
+    # ------------------------------------------------------------------
+    def format_position_size(self, ps_data: Dict, symbol: str) -> str:
+        """Returns formatted position size text for Telegram message."""
+        pos_size = ps_data.get("position_size", 0.0)
+        units = ps_data.get("units", 0.0)
+        risk_amt = ps_data.get("risk_amount", 0.0)
+        risk_pct = ps_data.get("risk_percent", 0.0)
+
+        return (
+            f"⚖️ Position Sizing ({symbol.upper()}):\n"
+            f"• Risk: ${risk_amt:.2f} ({risk_pct:.1f}%)\n"
+            f"• Position Size: {pos_size:.2f} Lots\n"
+            f"• Units: {units:,.0f}"
         )
