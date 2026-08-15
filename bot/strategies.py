@@ -42,6 +42,43 @@ except ImportError:
     from . import indicators
 
 
+
+try:
+    from volume_profile import VolumeProfileStrategy
+except ImportError:
+    try:
+        from .volume_profile import VolumeProfileStrategy
+    except ImportError:
+        VolumeProfileStrategy = None
+
+try:
+    from ict_killzones import ICKillzoneStrategy
+except ImportError:
+    try:
+        from .ict_killzones import ICKillzoneStrategy
+    except ImportError:
+        ICKillzoneStrategy = None
+
+
+try:
+    from fvg_strategy import FVGStrategy
+    HAS_FVG = True
+except ImportError:
+    HAS_FVG = False
+
+try:
+    from ict_killzones import ICTKillzoneStrategy
+    HAS_ICT = True
+except ImportError:
+    HAS_ICT = False
+
+try:
+    from volume_profile import VolumeProfileStrategy
+    HAS_VP = True
+except ImportError:
+    HAS_VP = False
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -892,6 +929,15 @@ class StrategyManager:
             "stochastic_reversal": StochasticReversalStrategy(),
             "trend_adx": TrendADXStrategy(),
         }
+        # Add advanced strategies if available
+        if HAS_FVG:
+            self.strategies["fvg"] = FVGStrategy()
+        if HAS_ICT:
+            self.strategies["ict_killzones"] = ICTKillzoneStrategy()
+        if HAS_VP:
+            self.strategies["volume_profile"] = VolumeProfileStrategy()
+        if ICKillzoneStrategy is not None:
+            self.strategies["ict_killzones"] = ICKillzoneStrategy()
 
     def run_all(self, bars: Any, cfg: Optional[BotConfig] = None) -> List[Dict[str, Any]]:
         """

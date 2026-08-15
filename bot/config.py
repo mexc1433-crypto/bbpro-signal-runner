@@ -75,13 +75,23 @@ class BotConfig:
 
     # ── NEW: Multi-strategy ────────────────────────────────────────────────
     # Enabled strategies: "breakout", "rsi_reversal", "ema_crossover",
-    #                     "sr_bounce", "bb_mean_reversion"
+    #                     "sr_bounce", "bb_mean_reversion", "macd_crossover",
+    #                     "stochastic_reversal", "trend_adx",
+    #                     "fvg", "ict_killzones", "volume_profile"
     enabled_strategies: List[str] = field(default_factory=lambda: [
-        "breakout", "rsi_reversal", "ema_crossover", "sr_bounce", "bb_mean_reversion"
+        "breakout", "rsi_reversal", "ema_crossover", "sr_bounce", "bb_mean_reversion",
+        "fvg", "ict_killzones", "volume_profile"
     ])
     # Require 3+ strategies to agree before sending signal
     require_consensus: bool = False
     min_consensus_count: int = 2
+
+    # ── NEW: Advanced strategies config ────────────────────────────────────
+    enable_ict_killzones: bool = True
+    enable_fvg_strategy: bool = True
+    enable_volume_profile: bool = True
+    enable_correlation: bool = True
+    killzone_timezone: str = "UTC"
 
     # ── NEW: Multi-timeframe confluence ───────────────────────────────────
     enable_multi_tf: bool = True

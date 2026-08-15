@@ -147,6 +147,31 @@ try:
 except ImportError:
     HAS_TG_CMDS = False
 
+# ── v4 Advanced strategies ──────────────────────────────────────────────────
+try:
+    from fvg_strategy import FVGStrategy
+    HAS_FVG_STRAT = True
+except ImportError:
+    HAS_FVG_STRAT = False
+
+try:
+    from ict_killzones import ICTKillzoneStrategy
+    HAS_ICT_STRAT = True
+except ImportError:
+    HAS_ICT_STRAT = False
+
+try:
+    from volume_profile import VolumeProfileStrategy
+    HAS_VP_STRAT = True
+except ImportError:
+    HAS_VP_STRAT = False
+
+try:
+    from correlation import CorrelationAnalyzer
+    HAS_CORRELATION = True
+except ImportError:
+    HAS_CORRELATION = False
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -251,6 +276,23 @@ class BollingerBreakoutSignalBot:
         if HAS_DIVERGENCE:
             self.divergence = DivergenceDetector()
 
+        # ── v4 Advanced strategy components ──────────────────────────────
+        self.fvg_strategy: Optional[FVGStrategy] = None
+        if HAS_FVG_STRAT:
+            self.fvg_strategy = FVGStrategy()
+
+        self.ict_killzones: Optional[ICTKillzoneStrategy] = None
+        if HAS_ICT_STRAT:
+            self.ict_killzones = ICTKillzoneStrategy()
+
+        self.vol_profile: Optional[VolumeProfileStrategy] = None
+        if HAS_VP_STRAT:
+            self.vol_profile = VolumeProfileStrategy()
+
+        self.correlation: Optional[CorrelationAnalyzer] = None
+        if HAS_CORRELATION:
+            self.correlation = CorrelationAnalyzer()
+
         # Telegram command handler
         self.cmd_handler: Optional[TelegramCommandHandler] = None
         if HAS_TG_CMDS and self.cfg.telegram_enabled:
@@ -278,6 +320,10 @@ class BollingerBreakoutSignalBot:
         if HAS_REGIME: features.append("Regime")
         if HAS_DIVERGENCE: features.append("Divergence")
         if HAS_TG_CMDS: features.append("TgCmds")
+        if HAS_FVG_STRAT: features.append("FVG")
+        if HAS_ICT_STRAT: features.append("ICT-Killzones")
+        if HAS_VP_STRAT: features.append("VolProfile")
+        if HAS_CORRELATION: features.append("Correlation")
         self._features = features
 
     # ------------------------------------------------------------------

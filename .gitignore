@@ -12,3 +12,4 @@ build/
 *.zip
 .vercel
 .env*
+.railway/token
