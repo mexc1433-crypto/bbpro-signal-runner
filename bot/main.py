@@ -203,6 +203,9 @@ class BollingerBreakoutSignalBot:
         self._last_bar_ts: Optional[float] = None
         self._kill_switch_active = False
 
+        # News auto-pause
+        self.news_auto_pause = NewsAutoPause(self.cfg) if getattr(self.cfg, "enable_news_auto_pause", True) else None
+
         # Cooldown tracking
         self._last_signal_time: Dict[str, datetime] = {}
 
@@ -565,6 +568,15 @@ class BollingerBreakoutSignalBot:
         if self._kill_switch_active:
             return
 
+        # High-impact news auto-pause
+        if self.news_auto_pause:
+            paused, reason = self.news_auto_pause.is_paused(now_utc)
+            if paused:
+                if self.cfg.show_debug:
+                    logger.info("[%s] Paused: %s", self.cfg.symbol, reason)
+                return
+
+
         # Daily signal limit check
         if self._daily_signal_count >= getattr(self.cfg, 'max_daily_signals', 4):
             if self.cfg.show_debug:
@@ -705,6 +717,55 @@ class BollingerBreakoutSignalBot:
                 if best:
                     best_signal = best.get("signal")
                     best_strategy = best.get("strategy", "unknown")
+
+
+        # ── Write confluence state for dashboard ─────────────────────────
+        try:
+            import json as _json
+            from datetime import datetime as _dt, timezone as _tz
+
+            buy_strats = [r.get("strategy", "") for r in strategy_results
+                          if str(r.get("signal", "")).replace("TradeDirection.", "").lower() == "buy"
+                          and r.get("confidence", 0) > 0]
+            sell_strats = [r.get("strategy", "") for r in strategy_results
+                           if str(r.get("signal", "")).replace("TradeDirection.", "").lower() == "sell"
+                           and r.get("confidence", 0) > 0]
+            total = len(strategy_results) if strategy_results else 0
+            neutral = total - len(buy_strats) - len(sell_strats)
+
+            if len(buy_strats) > len(sell_strats):
+                consensus_dir = "buy"
+                strength = round(len(buy_strats) / max(total, 1) * 100)
+            elif len(sell_strats) > len(buy_strats):
+                consensus_dir = "sell"
+                strength = round(len(sell_strats) / max(total, 1) * 100)
+            else:
+                consensus_dir = "neutral"
+                strength = 0
+
+            # Read existing state file and update this symbol
+            state = {}
+            try:
+                with open("/tmp/confluence_state.json", "r") as sf:
+                    state = _json.load(sf)
+            except Exception:
+                pass
+
+            state["timestamp"] = _dt.now(_tz.utc).isoformat()
+            state[self.cfg.symbol] = {
+                "buy_count": len(buy_strats),
+                "sell_count": len(sell_strats),
+                "neutral_count": neutral,
+                "buy_strategies": buy_strats,
+                "sell_strategies": sell_strats,
+                "consensus": consensus_dir,
+                "consensus_strength": strength,
+            }
+
+            with open("/tmp/confluence_state.json", "w") as sf:
+                _json.dump(state, sf)
+        except Exception:
+            pass  # Never break the main loop
 
         # Determine direction to check
         if best_signal:

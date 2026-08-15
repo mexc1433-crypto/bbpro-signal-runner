@@ -161,6 +161,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   /* Button controls */
   .btn:hover { opacity: 0.9; }
+
+<style>
+.heat-grid { display:grid; gap:10px; margin-top:12px; }
+.heat-row { display:grid; grid-template-columns: 80px 1fr 1fr 1fr 80px; gap:8px; align-items:center; padding:8px 10px; border-radius:8px; background:rgba(255,255,255,0.03); }
+.heat-row:hover { background:rgba(255,255,255,0.06); }
+.heat-sym { font-weight:700; font-size:14px; }
+.heat-bar-wrap { position:relative; height:22px; border-radius:4px; background:rgba(128,128,128,0.15); overflow:hidden; }
+.heat-bar-buy { position:absolute; left:0; top:0; height:100%; background:linear-gradient(90deg,#10b981,#34d399); border-radius:4px; transition:width .5s; }
+.heat-bar-sell { position:absolute; right:0; top:0; height:100%; background:linear-gradient(270deg,#ef4444,#f87171); border-radius:4px; transition:width .5s; }
+.heat-count { text-align:center; font-weight:600; font-size:13px; }
+.heat-consensus { text-align:center; font-weight:700; font-size:13px; }
+.heat-consensus.buy { color:#34d399; }
+.heat-consensus.sell { color:#f87171; }
+.heat-consensus.neutral { color:var(--muted); }
+.news-card { padding:14px; border-radius:10px; background:rgba(255,255,255,0.03); margin-top:12px; }
+.news-paused { background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); }
+.news-ok { background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); }
+.news-badge { display:inline-block; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; }
+.news-badge.paused { background:#ef4444; color:#fff; }
+.news-badge.ok { background:#10b981; color:#fff; }
+</style>
+
 </style>
 </head>
 <body>
@@ -369,6 +391,29 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
   </div>
 
+</div>
+
+
+<div class="section" style="margin-top:16px;">
+  <div class="section-header">
+    <div class="section-title"><div class="section-icon">🔥</div> Heatmap الاستراتيجيات (Confluence)</div>
+  </div>
+  <div class="heat-grid" id="heatGrid">
+    <div class="heat-row" style="font-size:11px;color:var(--muted);font-weight:600;">
+      <div>الزوج</div><div style="text-align:center">شراء</div><div style="text-align:center">توافق</div><div style="text-align:center">بيع</div><div>الاتجاه</div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:16px;">
+  <div class="section-header">
+    <div class="section-title"><div class="section-icon">🔇</div> حالة الأخبار الاقتصادية</div>
+  </div>
+  <div class="news-card" id="newsCard">
+    <span id="newsStatusBadge" class="news-badge ok">جاري التحميل...</span>
+    <span id="newsReason" style="margin-right:10px;font-size:13px"></span>
+    <div id="newsNextEvent" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+  </div>
 </div>
 
 <div class="footer">
@@ -775,6 +820,72 @@ window.addEventListener('load', () => {
     document.head.appendChild(s);
   }, 1000);
 });
+
+// ── Confluence Heatmap ──────────────────────────────────────────
+async function loadConfluence() {
+  try {
+    const data = await fetchJSON('/api/confluence');
+    if (!data) return;
+    const grid = document.getElementById('heatGrid');
+    if (!grid) return;
+    const symbols = ['EURUSD','XAUUSD','GBPUSD','USDJPY','EURJPY','USDCAD'];
+    // Keep header row
+    grid.innerHTML = '<div class="heat-row" style="font-size:11px;color:var(--muted);font-weight:600;"><div>الزوج</div><div style="text-align:center">شراء</div><div style="text-align:center">توافق</div><div style="text-align:center">بيع</div><div>الاتجاه</div></div>';
+    symbols.forEach(sym => {
+      const s = data[sym] || {buy_count:0,sell_count:0,neutral_count:11,consensus:'neutral',consensus_strength:0};
+      const total = s.buy_count + s.sell_count + s.neutral_count || 1;
+      const buyPct = (s.buy_count / total * 100) || 0;
+      const sellPct = (s.sell_count / total * 100) || 0;
+      const neutralPct = (s.neutral_count / total * 100) || 0;
+      const conClass = s.consensus || 'neutral';
+      const arrow = s.consensus === 'buy' ? '▲' : (s.consensus === 'sell' ? '▼' : '—');
+      const row = document.createElement('div');
+      row.className = 'heat-row';
+      row.innerHTML = `<div class="heat-sym">${sym}</div><div class="heat-count" style="color:#34d399">${s.buy_count||0}</div><div class="heat-bar-wrap"><div class="heat-bar-buy" style="width:${buyPct}%"></div><div class="heat-bar-sell" style="width:${sellPct}%"></div></div><div class="heat-count" style="color:#f87171">${s.sell_count||0}</div><div class="heat-consensus ${conClass}">${arrow} ${s.consensus_strength||0}%</div>`;
+      grid.appendChild(row);
+    });
+  } catch(e) { console.error('confluence error:', e); }
+}
+
+// ── News Status ─────────────────────────────────────────────────
+async function loadNewsStatus() {
+  try {
+    const data = await fetchJSON('/api/news_status');
+    if (!data) return;
+    const badge = document.getElementById('newsStatusBadge');
+    const reason = document.getElementById('newsReason');
+    const next = document.getElementById('newsNextEvent');
+    const card = document.getElementById('newsCard');
+    if (!badge) return;
+    if (!data.enabled) {
+      badge.className = 'news-badge ok';
+      badge.textContent = 'معطّل';
+      reason.textContent = '';
+      next.textContent = '';
+      return;
+    }
+    if (data.paused) {
+      badge.className = 'news-badge paused';
+      badge.textContent = '⏸ متوقف';
+      reason.textContent = data.reason || '';
+      card.className = 'news-card news-paused';
+    } else {
+      badge.className = 'news-badge ok';
+      badge.textContent = '✓ يعمل';
+      reason.textContent = '';
+      card.className = 'news-card news-ok';
+    }
+    if (data.next_event) {
+      next.textContent = 'الحدث القادم: ' + (data.next_event.name || '') + ' — ' + (data.next_event.date || '') + ' ' + (data.next_event.time_utc || '') + ' UTC';
+    }
+  } catch(e) { console.error('news status error:', e); }
+}
+
+// Add to refresh cycle
+loadConfluence();
+loadNewsStatus();
+setInterval(() => { loadConfluence(); loadNewsStatus(); }, 15000);
+
 </script>
 
 </body>
@@ -1180,6 +1291,56 @@ def create_app(db_path: str = "bbpro.db"):
             return jsonify({'commentary': commentary, 'enabled': True, 'symbol': symbol})
         except Exception as e:
             return jsonify({'commentary': f'Error: {str(e)}', 'enabled': False}), 500
+
+
+    @app.route("/api/confluence")
+    def api_confluence():
+        """Return real-time confluence state for all symbols."""
+        import json as _json
+        import os as _os
+        from datetime import datetime as _dt, timezone as _tz
+
+        state = {}
+        try:
+            with open("/tmp/confluence_state.json", "r") as sf:
+                state = _json.load(sf)
+            # Check freshness
+            ts = state.get("timestamp", "")
+            if ts:
+                age = (_dt.now(_tz.utc) - _dt.fromisoformat(ts)).total_seconds()
+                if age > 600:  # stale > 10 min
+                    state = {}
+        except Exception:
+            pass
+
+        if not state:
+            # Return placeholder data
+            symbols = ["EURUSD", "XAUUSD", "GBPUSD", "USDJPY", "EURJPY", "USDCAD"]
+            state = {
+                "timestamp": _dt.now(_tz.utc).isoformat(),
+                **{s: {
+                    "buy_count": 0, "sell_count": 0, "neutral_count": 11,
+                    "buy_strategies": [], "sell_strategies": [],
+                    "consensus": "neutral", "consensus_strength": 0
+                } for s in symbols}
+            }
+
+        return jsonify(state)
+
+    @app.route("/api/news_status")
+    def api_news_status():
+        """Return high-impact news auto-pause status."""
+        try:
+            import sys as _sys
+            _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from news_auto_pause import NewsAutoPause
+            nap = NewsAutoPause()
+            return jsonify(nap.get_status())
+        except Exception as e:
+            return jsonify({
+                "enabled": False, "paused": False, "reason": "",
+                "next_event": None, "error": str(e)
+            })
 
     return app
 

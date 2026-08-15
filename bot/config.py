@@ -284,6 +284,7 @@ class BotConfig:
 
     # ── NEW: Multi-entry suggestion ────────────────────────────────────
     enable_multi_entry: bool = True
+    enable_news_auto_pause: bool = True
     multi_entry_levels: int = 3
 
     @property
@@ -373,6 +374,7 @@ def load_config() -> BotConfig:
     cfg.enable_position_sizing = os.environ.get('ENABLE_POSITION_SIZING', 'true').strip().lower() != 'false'
     cfg.enable_trailing_stop_suggestion = os.environ.get('ENABLE_TRAILING_STOP', 'true').strip().lower() != 'false'
     cfg.enable_multi_entry = os.environ.get('ENABLE_MULTI_ENTRY', 'true').strip().lower() != 'false'
+    cfg.enable_news_auto_pause = os.environ.get('ENABLE_NEWS_AUTO_PAUSE', 'true').strip().lower() != 'false'
     cfg.default_account_balance = float(os.environ.get('ACCOUNT_BALANCE', '10000'))
 
     return cfg
