@@ -10,3 +10,5 @@ venv/
 dist/
 build/
 *.zip
+.vercel
+.env*
