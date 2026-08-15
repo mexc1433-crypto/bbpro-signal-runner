@@ -1,26 +1,32 @@
 """
 main.py
 =======
-BBPro Signal Bot — Ultimate Edition
+BBPro Signal Bot — Ultimate Edition v3
 
 Signal-only bot that sends trade recommendations via Telegram.
+NO real orders are placed. The human takes the decision.
 
 Features:
-  1. Cooldown per symbol (prevent spam)
-  2. R:R ratio enforcement (auto-reject if < 1.5)
-  3. Signal tracking (WIN/LOSS/EXPIRED)
-  4. Inline Telegram buttons
-  5. Candlestick pattern confirmation
-  6. Multi-strategy support (BB, RSI, EMA, S/R, Mean Reversion)
-  7. Multi-timeframe confluence
-  8. Signal expiry
-  9. Support/Resistance levels in signal
- 10. Economic calendar integration
- 11. Symbol-specific profiles
- 13. Pre-signal alerts
- 15. Daily/weekly performance reports
-
-No real orders are placed. The human takes the decision.
+  1.  Cooldown per symbol (prevent spam)
+  2.  R:R ratio enforcement (auto-reject if < 1.5)
+  3.  Signal tracking (WIN/LOSS/EXPIRED)
+  4.  Inline Telegram buttons
+  5.  Candlestick pattern confirmation (8 patterns)
+  6.  Multi-strategy engine (8 strategies)
+  7.  Multi-timeframe confluence (M15/M30/H1/H4)
+  8.  Signal expiry
+  9.  Support/Resistance levels in signal
+ 10.  Economic calendar integration
+ 11.  Symbol-specific profiles (6 symbols)
+ 12.  Pre-signal alerts
+ 13.  Daily/weekly performance reports
+ 14.  Smart Money Concepts (SMC): Order Blocks, FVG, BOS/CHoCH, Liquidity Sweeps
+ 15.  VWAP strategy with bands
+ 16.  RSI & MACD Divergence detection
+ 17.  Market Regime Detection (trending/ranging/volatile/choppy)
+ 18.  Risk Manager Pro: Kelly Criterion, Multi-TP, Break-Even, Signal Quality Score
+ 19.  Backtesting engine
+ 20.  Telegram bot commands (/status, /stats, /backtest, /report, /news, /help)
 """
 
 import asyncio
@@ -49,7 +55,7 @@ from groq_analyzer import GroqAnalyzer
 from storage.database import TradeDB
 from analytics.performance import PerformanceAnalyzer
 
-# Optional imports for new features
+# ── Core feature imports ──────────────────────────────────────────────────
 try:
     from candlestick import detect_all_patterns
     HAS_CANDLESTICK = True
@@ -98,6 +104,49 @@ try:
 except ImportError:
     HAS_PROFILES = False
 
+# ── Advanced feature imports (v3) ──────────────────────────────────────────
+try:
+    from smc import SmartMoneyConcepts
+    HAS_SMC = True
+except ImportError:
+    HAS_SMC = False
+
+try:
+    from vwap import VWAPStrategy
+    HAS_VWAP = True
+except ImportError:
+    HAS_VWAP = False
+
+try:
+    from risk_manager_pro import RiskManagerPro
+    HAS_RISK_PRO = True
+except ImportError:
+    HAS_RISK_PRO = False
+
+try:
+    from backtest import Backtester
+    HAS_BACKTEST = True
+except ImportError:
+    HAS_BACKTEST = False
+
+try:
+    from market_regime import MarketRegimeDetector
+    HAS_REGIME = True
+except ImportError:
+    HAS_REGIME = False
+
+try:
+    from divergence import DivergenceDetector
+    HAS_DIVERGENCE = True
+except ImportError:
+    HAS_DIVERGENCE = False
+
+try:
+    from telegram_commands import TelegramCommandHandler
+    HAS_TG_CMDS = True
+except ImportError:
+    HAS_TG_CMDS = False
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -108,7 +157,7 @@ logger = logging.getLogger("BBProSignal")
 
 
 class BollingerBreakoutSignalBot:
-    """Signal-only bot — Ultimate Edition."""
+    """Signal-only bot — Ultimate Edition v3."""
 
     def __init__(self, cfg: Optional[BotConfig] = None):
         self.cfg = cfg or DEFAULT_CONFIG
@@ -123,13 +172,13 @@ class BollingerBreakoutSignalBot:
         self._last_bar_ts: Optional[float] = None
         self._kill_switch_active = False
 
-        # ── NEW: Cooldown tracking ────────────────────────────────────────
+        # Cooldown tracking
         self._last_signal_time: Dict[str, datetime] = {}
 
-        # ── NEW: Pre-signal alert tracking ────────────────────────────────
+        # Pre-signal alert tracking
         self._pre_alert_sent: Dict[str, bool] = {}
 
-        # ── NEW: Components ────────────────────────────────────────────────
+        # ── Core components ────────────────────────────────────────────
         self.notifier = create_notifier(
             self.cfg.telegram_bot_token,
             self.cfg.telegram_chat_id,
@@ -177,8 +226,59 @@ class BollingerBreakoutSignalBot:
         if HAS_SR:
             self.sr_calc = SRLevels(lookback=self.cfg.sr_lookback)
 
+        # ── Advanced components (v3) ────────────────────────────────────
+        self.smc: Optional[SmartMoneyConcepts] = None
+        if HAS_SMC:
+            self.smc = SmartMoneyConcepts()
+
+        self.vwap: Optional[VWAPStrategy] = None
+        if HAS_VWAP:
+            self.vwap = VWAPStrategy()
+
+        self.risk_pro: Optional[RiskManagerPro] = None
+        if HAS_RISK_PRO:
+            self.risk_pro = RiskManagerPro()
+
+        self.backtester: Optional[Backtester] = None
+        if HAS_BACKTEST:
+            self.backtester = Backtester()
+
+        self.regime_detector: Optional[MarketRegimeDetector] = None
+        if HAS_REGIME:
+            self.regime_detector = MarketRegimeDetector()
+
+        self.divergence: Optional[DivergenceDetector] = None
+        if HAS_DIVERGENCE:
+            self.divergence = DivergenceDetector()
+
+        # Telegram command handler
+        self.cmd_handler: Optional[TelegramCommandHandler] = None
+        if HAS_TG_CMDS and self.cfg.telegram_enabled:
+            self.cmd_handler = TelegramCommandHandler(
+                bot_token=self.cfg.telegram_bot_token,
+                chat_id=self.cfg.telegram_chat_id,
+                bot_instance=self,
+            )
+
         # Daily report tracking
         self._last_report_date: Optional[str] = None
+
+        # Active feature flags
+        features = []
+        if HAS_CANDLESTICK: features.append("Candlestick")
+        if HAS_STRATEGIES: features.append("MultiStrat")
+        if HAS_MTF: features.append("MTF")
+        if HAS_SR: features.append("S/R")
+        if HAS_TRACKER: features.append("Tracker")
+        if HAS_ECON_CAL: features.append("EconCal")
+        if HAS_SMC: features.append("SMC")
+        if HAS_VWAP: features.append("VWAP")
+        if HAS_RISK_PRO: features.append("RiskPro")
+        if HAS_BACKTEST: features.append("Backtest")
+        if HAS_REGIME: features.append("Regime")
+        if HAS_DIVERGENCE: features.append("Divergence")
+        if HAS_TG_CMDS: features.append("TgCmds")
+        self._features = features
 
     # ------------------------------------------------------------------
     #  LIFECYCLE
@@ -195,14 +295,11 @@ class BollingerBreakoutSignalBot:
                 logger.warning("Web monitor failed to start: %s", e)
 
         logger.info("=" * 70)
-        logger.info("BBPro Signal Bot — ULTIMATE Edition")
+        logger.info("BBPro Signal Bot — ULTIMATE Edition v3")
         logger.info("=" * 70)
         logger.info("Symbol: %s | TF: %s | Mode: SIGNAL ONLY", self.cfg.symbol, self.cfg.timeframe)
         logger.info("Strategies: %s", ", ".join(self.cfg.enabled_strategies) if self.cfg.enabled_strategies else "none")
-        logger.info("Features: Cooldown=%dm | R:R≥%.1f | MTF=%s | Candlestick=%s | EconCal=%s",
-                    self.cfg.cooldown_minutes, self.cfg.min_rr_ratio,
-                    self.cfg.enable_multi_tf, self.cfg.enable_candlestick_confirm,
-                    self.cfg.enable_economic_calendar)
+        logger.info("Features active: %s", ", ".join(self._features))
         logger.info("Telegram=%s | DB=%s | Web=%s",
                     self.cfg.telegram_enabled, self.cfg.db_enabled, self.cfg.web_monitor_enabled)
         logger.info("=" * 70)
@@ -241,6 +338,11 @@ class BollingerBreakoutSignalBot:
         # Telegram start notification (first symbol only)
         if self.cfg.telegram_enabled:
             self.notifier.send_startup_message([self.cfg.symbol])
+
+        # Start Telegram command handler
+        if self.cmd_handler:
+            asyncio.create_task(self.cmd_handler.poll_loop())
+            logger.info("Telegram command handler started (/help for commands)")
 
         self._install_signal_handlers()
 
@@ -288,7 +390,7 @@ class BollingerBreakoutSignalBot:
             self._last_signal_time.clear()
             self._pre_alert_sent.clear()
 
-        # ── NEW: Daily report ─────────────────────────────────────────────
+        # Daily report
         if self.cfg.enable_daily_report and self._last_report_date != now_utc.strftime("%Y-%m-%d"):
             if now_utc.hour >= self.cfg.daily_report_hour_utc:
                 self._last_report_date = now_utc.strftime("%Y-%m-%d")
@@ -297,7 +399,7 @@ class BollingerBreakoutSignalBot:
                     stats["pending"] = len(self.tracker.get_active())
                     self.notifier.send_daily_report(stats)
 
-        # ── NEW: Check signal tracking results ────────────────────────────
+        # Check signal tracking results
         if self.tracker and self.tracker.get_active():
             try:
                 results = await self.tracker.check_signals(self.client)
@@ -314,7 +416,7 @@ class BollingerBreakoutSignalBot:
             except Exception as e:
                 logger.warning("[%s] Signal tracking error: %s", self.cfg.symbol, e)
 
-        # ── NEW: Economic calendar check ──────────────────────────────────
+        # Economic calendar check
         if self.econ_cal:
             try:
                 is_blackout, reason = self.econ_cal.is_blackout(self.cfg.symbol)
@@ -334,7 +436,7 @@ class BollingerBreakoutSignalBot:
             await self._on_bar_close(now_utc)
 
     # ------------------------------------------------------------------
-    #  NEW-BAR DETECTION (FIXED)
+    #  NEW-BAR DETECTION
     # ------------------------------------------------------------------
     async def _check_new_bar(self) -> bool:
         if not self.symbol_info:
@@ -372,7 +474,7 @@ class BollingerBreakoutSignalBot:
         if self._kill_switch_active:
             return
 
-        # ── NEW: Cooldown check ──────────────────────────────────────────
+        # Cooldown check
         if self._is_in_cooldown(self.cfg.symbol, now_utc):
             if self.cfg.show_debug:
                 remaining = self._cooldown_remaining(self.cfg.symbol, now_utc)
@@ -409,11 +511,27 @@ class BollingerBreakoutSignalBot:
         if any(np.isnan([bb_upper, bb_lower, rsi_now, ema_f, ema_s, atr_now])):
             return
 
-        # ── NEW: Pre-signal alert ────────────────────────────────────────
+        # ── Market Regime Detection ────────────────────────────────────
+        regime = None
+        regime_strategies = None
+        if self.regime_detector:
+            try:
+                regime = self.regime_detector.detect(self.bars)
+                regime_strategies = set(regime.recommended_strategies)
+                if regime.regime == "choppy":
+                    if self.cfg.show_debug:
+                        logger.info("[%s] Market choppy — skipping", self.cfg.symbol)
+                    return
+                if self.cfg.show_debug:
+                    logger.info("[%s] Regime: %s (ADX=%.0f, conf=%.0f%%)",
+                                self.cfg.symbol, regime.regime, regime.adx, regime.confidence)
+            except Exception as e:
+                logger.warning("[%s] Regime detection failed: %s", self.cfg.symbol, e)
+
+        # ── Pre-signal alert ────────────────────────────────────────────
         if self.cfg.enable_pre_signal_alert:
             bb_width = bb_upper - bb_lower
             if bb_width > 0:
-                # Check if price is approaching bands
                 dist_to_upper = (bb_upper - close_now) / bb_width
                 dist_to_lower = (close_now - bb_lower) / bb_width
 
@@ -428,7 +546,6 @@ class BollingerBreakoutSignalBot:
                     self._pre_alert_sent.pop(f"{self.cfg.symbol}_buy", None)
 
                 else:
-                    # Reset if price moves away from bands
                     if dist_to_upper > 0.3:
                         self._pre_alert_sent.pop(f"{self.cfg.symbol}_buy", None)
                     if dist_to_lower > 0.3:
@@ -443,72 +560,98 @@ class BollingerBreakoutSignalBot:
         if self.cfg.max_spread_pips > 0 and spread_pips > self.cfg.max_spread_pips:
             return
 
-        # ── NEW: Multi-timeframe confluence ──────────────────────────────
+        # ── Multi-timeframe confluence ──────────────────────────────────
         mtf_result = None
         if self.cfg.enable_multi_tf and self.mtf_analyzer:
             try:
                 mtf_result = await self.mtf_analyzer.analyze(self.client, self.cfg.symbol, self.cfg)
                 if mtf_result["confluence"] < self.cfg.min_tf_confluence:
                     if self.cfg.show_debug:
-                        logger.info("[%s] MTF confluence too low: %.0f%%", self.cfg.symbol, mtf_result["confluence"])
-                    return
-                if mtf_result["direction"] == "neutral":
-                    if self.cfg.show_debug:
-                        logger.info("[%s] MTF neutral", self.cfg.symbol)
+                        logger.info("[%s] MTF confluence too low: %.0f%% < %.0f%%",
+                                    self.cfg.symbol, mtf_result["confluence"], self.cfg.min_tf_confluence)
                     return
             except Exception as e:
                 logger.warning("[%s] MTF analysis failed: %s", self.cfg.symbol, e)
 
-        # ── NEW: Run multi-strategy ───────────────────────────────────────
+        # ── Multi-strategy analysis ─────────────────────────────────────
         best_signal = None
-        best_score = 0
         best_strategy = ""
-        consensus_direction = None
-
-        if HAS_STRATEGIES and self.strategy_mgr:
+        strategy_results = []
+        if self.strategy_mgr:
             try:
-                results = self.strategy_mgr.run_all(self.bars, self.cfg)
-                if results:
-                    # Check for consensus
-                    buy_count = sum(1 for r in results if r.get("signal") == TradeDirection.BUY)
-                    sell_count = sum(1 for r in results if r.get("signal") == TradeDirection.SELL)
+                strategy_results = self.strategy_mgr.run_all(self.bars, self.cfg)
+                if strategy_results:
+                    best = self.strategy_mgr.get_best_signal(strategy_results)
+                    if best:
+                        best_signal = best.signal
+                        best_strategy = best.strategy
 
-                    if buy_count >= self.cfg.min_consensus_count and buy_count > sell_count:
-                        consensus_direction = TradeDirection.BUY
-                    elif sell_count >= self.cfg.min_consensus_count and sell_count > buy_count:
-                        consensus_direction = TradeDirection.SELL
-
-                    if self.cfg.require_consensus and not consensus_direction:
-                        return
-
-                    # Get best signal
-                    best = self.strategy_mgr.get_best_signal(results)
-                    if best and best.get("signal"):
-                        best_signal = best["signal"]
-                        best_score = best.get("confidence", 0)
-                        best_strategy = best.get("strategy", "")
-                    elif consensus_direction:
-                        best_signal = consensus_direction
-                        best_score = max(buy_count, sell_count) * 20
-                        best_strategy = "consensus"
+                    # Consensus check
+                    if self.cfg.require_consensus:
+                        consensus = self.strategy_mgr.get_consensus(strategy_results)
+                        if consensus:
+                            best_signal = consensus[0]
+                            best_strategy = f"consensus({consensus[1]})"
+                        else:
+                            if self.cfg.show_debug:
+                                logger.info("[%s] No strategy consensus", self.cfg.symbol)
+                            return
             except Exception as e:
-                logger.warning("[%s] Strategy manager failed: %s", self.cfg.symbol, e)
+                logger.warning("[%s] Strategy analysis failed: %s", self.cfg.symbol, e)
 
-        # Determine direction: use strategy manager or fallback to BB breakout
-        directions_to_check = []
+        # Filter strategies by market regime
+        if regime_strategies and strategy_results:
+            filtered = [r for r in strategy_results if r.strategy in regime_strategies]
+            if filtered:
+                strategy_results = filtered
+                best = self.strategy_mgr.get_best_signal(filtered)
+                if best:
+                    best_signal = best.signal
+                    best_strategy = best.strategy
+
+        # Determine direction to check
         if best_signal:
             directions_to_check = [best_signal]
         else:
-            # Fallback: check both directions with BB breakout
             directions_to_check = [TradeDirection.BUY, TradeDirection.SELL]
 
-        # ── NEW: Candlestick pattern confirmation ────────────────────────
+        # ── Candlestick pattern confirmation ────────────────────────────
         patterns = []
         if self.cfg.enable_candlestick_confirm and HAS_CANDLESTICK:
             try:
                 patterns = detect_all_patterns(self.bars[-10:])
             except Exception as e:
                 logger.warning("[%s] Candlestick detection failed: %s", self.cfg.symbol, e)
+
+        # ── SMC Analysis ────────────────────────────────────────────────
+        smc_result = None
+        if self.smc:
+            try:
+                smc_result = self.smc.analyze(self.bars)
+            except Exception as e:
+                logger.warning("[%s] SMC analysis failed: %s", self.cfg.symbol, e)
+
+        # ── VWAP Analysis ───────────────────────────────────────────────
+        vwap_result = None
+        if self.vwap:
+            try:
+                vwap_result = self.vwap.analyze(self.bars)
+            except Exception as e:
+                logger.warning("[%s] VWAP analysis failed: %s", self.cfg.symbol, e)
+
+        # ── Divergence Detection ────────────────────────────────────────
+        div_result = None
+        if self.divergence:
+            try:
+                rsi_arr = ind.get("rsi", np.array([]))
+                div_result = self.divergence.detect_all(closes, rsi_arr)
+                if div_result.get("any_bullish") or div_result.get("any_bearish"):
+                    logger.info("[%s] Divergence detected: bullish=%s bearish=%s",
+                                self.cfg.symbol,
+                                div_result.get("any_bullish", False),
+                                div_result.get("any_bearish", False))
+            except Exception as e:
+                logger.warning("[%s] Divergence detection failed: %s", self.cfg.symbol, e)
 
         # Check directions
         for direction in directions_to_check:
@@ -517,11 +660,10 @@ class BollingerBreakoutSignalBot:
             if not breakout and not best_signal:
                 continue
 
-            # Use best_signal from strategy manager even without BB breakout
             if best_signal and not breakout and best_strategy != "consensus":
                 continue
 
-            # ── NEW: Candlestick confirmation ─────────────────────────────
+            # Candlestick confirmation
             if self.cfg.enable_candlestick_confirm and patterns:
                 matching = [p for p in patterns if (p["bullish"] and direction == TradeDirection.BUY) or
                             (not p["bullish"] and direction == TradeDirection.SELL)]
@@ -531,10 +673,6 @@ class BollingerBreakoutSignalBot:
                         if self.cfg.show_debug:
                             logger.info("[%s] Pattern too weak: %s (%.1f)", self.cfg.symbol, strongest["pattern"], strongest["strength"])
                         continue
-                else:
-                    if self.cfg.show_debug:
-                        logger.info("[%s] No matching candlestick pattern", self.cfg.symbol)
-                    # Don't skip — patterns are confirmation, not hard requirement
 
             # Volatility ratio
             if self.cfg.min_volatility_ratio > 0:
@@ -587,14 +725,13 @@ class BollingerBreakoutSignalBot:
                     sl_price=new_sl_price, tp_price=sl_tp.tp_price,
                 )
 
-            # ── NEW: R:R ratio check ──────────────────────────────────────
+            # R:R ratio check
             sl_dist = abs(close_now - sl_tp.sl_price)
             tp_dist = abs(sl_tp.tp_price - close_now)
             rr_ratio = tp_dist / sl_dist if sl_dist > 0 else 0
 
             if self.cfg.min_rr_ratio > 0 and rr_ratio < self.cfg.min_rr_ratio:
                 logger.info("[%s] R:R too low: %.2f < %.2f", self.cfg.symbol, rr_ratio, self.cfg.min_rr_ratio)
-                # Adjust TP to meet minimum R:R
                 if direction == TradeDirection.BUY:
                     sl_tp = type(sl_tp)(
                         sl_pips=sl_tp.sl_pips,
@@ -611,7 +748,7 @@ class BollingerBreakoutSignalBot:
                     )
                 rr_ratio = self.cfg.min_rr_ratio
 
-            # ── NEW: Support/Resistance levels ─────────────────────────────
+            # ── S/R levels ───────────────────────────────────────────────
             sr_text = ""
             if self.cfg.enable_sr_levels and self.sr_calc:
                 try:
@@ -620,7 +757,7 @@ class BollingerBreakoutSignalBot:
                 except Exception as e:
                     logger.warning("[%s] S/R calculation failed: %s", self.cfg.symbol, e)
 
-            # ── NEW: Groq AI analysis ──────────────────────────────────────
+            # ── Groq AI analysis ─────────────────────────────────────────
             ai_confidence = 0
             ai_verdict = ""
             ai_reasoning = ""
@@ -658,11 +795,100 @@ class BollingerBreakoutSignalBot:
                 except Exception as e:
                     logger.warning("[%s] AI gate failed: %s", self.cfg.symbol, e)
 
-            # ── NEW: Generate signal ID ───────────────────────────────────
+            # ── SMC confirmation bonus ───────────────────────────────────
+            smc_text = ""
+            if smc_result and smc_result.signal:
+                if (smc_result.signal == "buy" and direction == TradeDirection.BUY) or \
+                   (smc_result.signal == "sell" and direction == TradeDirection.SELL):
+                    score += 10  # SMC alignment bonus
+                    smc_text = self.smc.format_for_signal(smc_result, self.cfg.symbol)
+
+            # ── VWAP confirmation bonus ──────────────────────────────────
+            vwap_text = ""
+            if vwap_result and vwap_result.signal:
+                if (vwap_result.signal == "buy" and direction == TradeDirection.BUY) or \
+                   (vwap_result.signal == "sell" and direction == TradeDirection.SELL):
+                    score += 5  # VWAP alignment bonus
+                vwap_text = self.vwap.format_for_signal(vwap_result, self.cfg.symbol)
+
+            # ── Divergence confirmation ──────────────────────────────────
+            div_text = ""
+            if div_result:
+                if div_result.get("any_bullish") and direction == TradeDirection.BUY:
+                    score += 8
+                    div_text = "⚡ Bullish Divergence detected"
+                elif div_result.get("any_bearish") and direction == TradeDirection.SELL:
+                    score += 8
+                    div_text = "⚡ Bearish Divergence detected"
+
+            # ── Signal Quality Score ─────────────────────────────────────
+            quality = None
+            quality_text = ""
+            if self.risk_pro:
+                try:
+                    quality = self.risk_pro.score_signal(
+                        indicators={
+                            "rsi": rsi_now,
+                            "ema_fast": ema_f,
+                            "ema_slow": ema_s,
+                            "close": close_now,
+                            "side": side,
+                        },
+                        mtf_confluence=mtf_result["confluence"] if mtf_result else 50,
+                        ai_confidence=ai_confidence,
+                        pattern_count=len(patterns),
+                        rr_ratio=rr_ratio,
+                        adx=adx_now,
+                    )
+                    quality_text = f"Quality: {quality.grade} ({quality.score:.0f}/100) — {quality.recommendation}"
+
+                    # Skip low-quality signals
+                    if quality.score < 40:
+                        logger.info("[%s] Signal quality too low: %.0f (%s)", self.cfg.symbol, quality.score, quality.grade)
+                        continue
+                except Exception as e:
+                    logger.warning("[%s] Quality scoring failed: %s", self.cfg.symbol, e)
+
+            # ── Multi-Level TP ───────────────────────────────────────────
+            multi_tp_text = ""
+            multi_tp = None
+            if self.risk_pro:
+                try:
+                    multi_tp = self.risk_pro.calculate_multi_tp(
+                        entry=close_now, sl_price=sl_tp.sl_price,
+                        side=side, pip_size=self.symbol_info.pip_size,
+                    )
+                    multi_tp_text = self.risk_pro.format_multi_tp(multi_tp, self.cfg.symbol)
+
+                    # Break-even suggestion
+                    be = self.risk_pro.calculate_break_even(
+                        entry=close_now, sl_price=sl_tp.sl_price,
+                        side=side, pip_size=self.symbol_info.pip_size,
+                    )
+                    multi_tp_text += f"\n💡 BE at {be['trigger_price']:.5f}"
+                except Exception as e:
+                    logger.warning("[%s] Multi-TP calculation failed: %s", self.cfg.symbol, e)
+
+            # ── Generate signal ID ──────────────────────────────────────
             signal_id = str(uuid.uuid4())[:8]
 
-            # ── SEND SIGNAL TO TELEGRAM ────────────────────────────────────
-            # Include strategy name in the message
+            # ── Build extra info text ────────────────────────────────────
+            extra_parts = []
+            if smc_text:
+                extra_parts.append(f"🏛️ SMC:\n{smc_text}")
+            if vwap_text:
+                extra_parts.append(vwap_text)
+            if div_text:
+                extra_parts.append(div_text)
+            if quality_text:
+                extra_parts.append(f"⭐ {quality_text}")
+            if multi_tp_text:
+                extra_parts.append(f"🎯 Multi-TP:\n{multi_tp_text}")
+            if regime:
+                extra_parts.append(f"📊 Regime: {regime.regime} (ADX={regime.adx:.0f})")
+            extra_text = "\n\n".join(extra_parts) if extra_parts else ""
+
+            # ── SEND SIGNAL TO TELEGRAM ─────────────────────────────────
             strategy_name = best_strategy if best_strategy else "BB Breakout"
             if patterns:
                 strongest = max(patterns, key=lambda p: p["strength"])
@@ -682,7 +908,13 @@ class BollingerBreakoutSignalBot:
                 signal_id=signal_id if self.cfg.enable_inline_buttons else "",
             )
 
-            # ── NEW: Track signal ──────────────────────────────────────────
+            # Send extra analysis as follow-up
+            if extra_text:
+                self.notifier.send(
+                    f"📊 Analysis | {self.cfg.symbol}\n\n{extra_text}"
+                )
+
+            # Track signal
             if self.tracker:
                 self.tracker.add_signal(
                     signal_id=signal_id,
@@ -694,7 +926,7 @@ class BollingerBreakoutSignalBot:
                     bar_time=self._last_bar_ts or time.time(),
                 )
 
-            # ── NEW: Update cooldown ──────────────────────────────────────
+            # Update cooldown
             self._last_signal_time[self.cfg.symbol] = now_utc
 
             # Log to DB
@@ -719,18 +951,21 @@ class BollingerBreakoutSignalBot:
                 "rr": rr_ratio, "strategy": strategy_name,
                 "signal_id": signal_id,
                 "time": now_utc.isoformat(),
+                "quality": quality.grade if quality else "N/A",
+                "regime": regime.regime if regime else "unknown",
             })
 
             # AI analysis message
             if self.ai.enabled and ai_reasoning:
                 self.notifier.send(
-                    f"📊 AI | {self.cfg.symbol} {side.upper()}\n"
+                    f"🤖 AI | {self.cfg.symbol} {side.upper()}\n"
                     f"Confidence: {ai_confidence}%\n{ai_reasoning}"
                 )
 
-            logger.info("[%s] SIGNAL SENT: %s @ %.5f | SL=%.1fp TP=%.1fp | R:R=1:%.1f | Score=%.0f | AI=%d%% | Strat=%s",
+            logger.info("[%s] SIGNAL SENT: %s @ %.5f | SL=%.1fp TP=%.1fp | R:R=1:%.1f | Score=%.0f | AI=%d%% | Strat=%s | Quality=%s",
                         self.cfg.symbol, side.upper(), close_now,
-                        sl_tp.sl_pips, sl_tp.tp_pips, rr_ratio, score, ai_confidence, strategy_name)
+                        sl_tp.sl_pips, sl_tp.tp_pips, rr_ratio, score, ai_confidence,
+                        strategy_name, quality.grade if quality else "N/A")
             break
 
     # ------------------------------------------------------------------
@@ -823,7 +1058,7 @@ async def run_symbol(symbol: str, web_enabled: bool = False):
 
 
 async def run_all_symbols():
-    logger.info("🚀 Starting BBPro Signal Bot Ultimate — %d symbols: %s",
+    logger.info("🚀 Starting BBPro Signal Bot Ultimate v3 — %d symbols: %s",
                 len(ALL_SYMBOLS), ", ".join(ALL_SYMBOLS))
     tasks = [
         asyncio.create_task(run_symbol(sym, web_enabled=(i == 0)))
