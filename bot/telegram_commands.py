@@ -1,7 +1,10 @@
 """
-telegram_commands.py — Telegram Bot Commands Handler
-========================================================
+telegram_commands.py — Telegram Bot Commands Handler (Secured)
+==================================================================
 Handles /commands sent to the Telegram bot.
+
+SECURITY: Only the authorized chat_id (owner) can use the bot.
+Any other user is rejected and ignored.
 
 Commands:
   /status    — Bot status and active signals
@@ -12,11 +15,11 @@ Commands:
   /news      — Show upcoming economic events
   /help      — Help message
   /stop      — Stop the bot
+  /whoami    — Show your chat ID (for debugging)
 """
 
 import logging
 import asyncio
-import json
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -31,15 +34,17 @@ except ImportError:
 
 
 class TelegramCommandHandler:
-    """Handles Telegram bot commands via polling getUpdates."""
+    """Handles Telegram bot commands via polling getUpdates. Secured to owner only."""
 
     def __init__(self, bot_token: str, chat_id: str, bot_instance=None):
         self.bot_token = bot_token
-        self.chat_id = chat_id
+        self.chat_id = str(chat_id).strip()
         self.bot = bot_instance
         self.enabled = bool(bot_token) and HAS_REQUESTS
         self._last_update_id = 0
         self._running = False
+        # Track rejected users to avoid spamming logs
+        self._rejected_ids: set = set()
 
     def send(self, text: str) -> bool:
         if not self.enabled:
@@ -60,7 +65,7 @@ class TelegramCommandHandler:
             return
 
         self._running = True
-        logger.info("Telegram command handler started")
+        logger.info("Telegram command handler started (owner chat_id=%s)", self.chat_id)
 
         while self._running:
             try:
@@ -70,7 +75,7 @@ class TelegramCommandHandler:
                     await self._handle_update(update)
             except Exception as e:
                 logger.warning("Telegram polling error: %s", e)
-            await asyncio.sleep(3)  # Poll every 3 seconds
+            await asyncio.sleep(3)
 
     async def _get_updates(self) -> list:
         """Get updates from Telegram."""
@@ -87,16 +92,72 @@ class TelegramCommandHandler:
             pass
         return []
 
+    def _extract_chat_id(self, update: dict) -> Optional[str]:
+        """Extract the sender's chat_id from an update."""
+        # Regular message
+        msg = update.get("message")
+        if msg:
+            chat = msg.get("chat", {})
+            return str(chat.get("id", ""))
+
+        # Callback query (button press)
+        cq = update.get("callback_query")
+        if cq:
+            msg = cq.get("message", {})
+            chat = msg.get("chat", {})
+            return str(chat.get("id", ""))
+            # Also check from field
+            from_user = cq.get("from", {})
+            from_id = str(from_user.get("id", ""))
+            if from_id:
+                return from_id
+
+        # Edited message
+        msg = update.get("edited_message")
+        if msg:
+            chat = msg.get("chat", {})
+            return str(chat.get("id", ""))
+
+        # Channel post
+        msg = update.get("channel_post")
+        if msg:
+            chat = msg.get("chat", {})
+            return str(chat.get("id", ""))
+
+        return None
+
+    def _is_authorized(self, update: dict) -> bool:
+        """Check if the update is from the authorized owner."""
+        sender_chat_id = self._extract_chat_id(update)
+        if not sender_chat_id:
+            return False
+        return sender_chat_id == self.chat_id
+
     async def _handle_update(self, update: dict):
-        """Handle a single update."""
-        message = update.get("message") or update.get("callback_query", {}).get("message")
-        if not message:
+        """Handle a single update — with authorization check."""
+        # ── AUTHORIZATION CHECK ────────────────────────────────────────
+        if not self._is_authorized(update):
+            sender_id = self._extract_chat_id(update)
+            if sender_id and sender_id not in self._rejected_ids:
+                self._rejected_ids.add(sender_id)
+                logger.warning("🚫 Unauthorized access attempt from chat_id=%s (rejected)", sender_id)
+                # Notify owner about the intrusion attempt
+                self.send(
+                    f"🚫 <b>محاولة دخول غير مصرح بها</b>\n"
+                    f"Chat ID: <code>{sender_id}</code>\n"
+                    f"تم رفض الوصول."
+                )
             return
 
-        # Handle callback queries (inline button presses)
+        # ── Handle callback queries (inline button presses) ────────────
         callback = update.get("callback_query")
         if callback:
             await self._handle_callback(callback)
+            return
+
+        # ── Handle regular messages ────────────────────────────────────
+        message = update.get("message")
+        if not message:
             return
 
         text = message.get("text", "").strip()
@@ -104,7 +165,7 @@ class TelegramCommandHandler:
             return
 
         parts = text.split()
-        cmd = parts[0].lower()
+        cmd = parts[0].lower().split("@")[0]  # Remove @botname suffix
         args = parts[1:]
 
         handlers = {
@@ -116,6 +177,7 @@ class TelegramCommandHandler:
             "/news": self._cmd_news,
             "/help": self._cmd_help,
             "/stop": self._cmd_stop,
+            "/whoami": self._cmd_whoami,
         }
 
         handler = handlers.get(cmd)
@@ -124,10 +186,17 @@ class TelegramCommandHandler:
             if response:
                 self.send(response)
         else:
-            self.send(f"Unknown command: {cmd}\nType /help for available commands")
+            # Don't respond to unknown commands — just ignore
+            pass
 
     async def _handle_callback(self, callback: dict):
-        """Handle inline button callback."""
+        """Handle inline button callback — with authorization."""
+        # Double-check authorization on callback
+        callback_chat_id = str(callback.get("from", {}).get("id", ""))
+        if callback_chat_id and callback_chat_id != self.chat_id:
+            logger.warning("🚫 Unauthorized callback from chat_id=%s", callback_chat_id)
+            return
+
         data = callback.get("data", "")
         query_id = callback.get("id", "")
 
@@ -160,7 +229,7 @@ class TelegramCommandHandler:
             pass
 
     # ------------------------------------------------------------------
-    # COMMANDS
+    # COMMANDS — Only accessible by the owner
     # ------------------------------------------------------------------
     async def _cmd_status(self, args) -> str:
         if not self.bot:
@@ -173,7 +242,7 @@ class TelegramCommandHandler:
             f"🤖 <b>Bot Status</b>",
             f"🕐 {now}",
             f"📍 Symbol: <code>{self.bot.cfg.symbol}</code>",
-            f"🎯 Mode: Signal Only",
+            f"🎯 Mode: Signal Only (Private)",
             f"📊 Active signals: {len(active)}",
         ]
         if active:
@@ -238,7 +307,7 @@ class TelegramCommandHandler:
 
     async def _cmd_help(self, args) -> str:
         return (
-            "🤖 <b>BBPro Signal Bot — Commands</b>\n"
+            "🤖 <b>BBPro Signal Bot v3 — Commands</b>\n"
             "━━━━━━━━━━━━━\n"
             "/status — Bot status & active signals\n"
             "/stats — Win/loss statistics\n"
@@ -246,18 +315,30 @@ class TelegramCommandHandler:
             "/report [daily|weekly] — Performance report\n"
             "/symbols — List active symbols\n"
             "/news [symbol] — Upcoming economic events\n"
+            "/whoami — Show your chat ID\n"
             "/help — This message\n"
             "/stop — Stop the bot\n"
             "━━━━━━━━━━━━━\n"
+            "🔒 <b>Secured</b>: Only owner can use this bot\n"
+            "━━━━━━━━━━━━━\n"
             "📊 Features:\n"
-            "• Multi-strategy (6 strategies)\n"
-            "• Multi-timeframe analysis\n"
-            "• Smart Money Concepts\n"
-            "• Candlestick patterns\n"
+            "• 8 strategies + SMC + VWAP\n"
+            "• Multi-timeframe analysis (M15/M30/H1/H4)\n"
+            "• Candlestick patterns (8)\n"
             "• RSI/MACD divergence\n"
             "• Market regime detection\n"
+            "• Signal Quality Score (A+/A/B/C/D)\n"
+            "• Multi-TP + Kelly Criterion\n"
             "• Economic calendar\n"
-            "• Signal tracking & scoring"
+            "• Signal tracking & backtesting"
+        )
+
+    async def _cmd_whoami(self, args) -> str:
+        """Show the owner's chat ID — useful for debugging."""
+        return (
+            f"🆔 <b>Your Chat ID</b>\n"
+            f"<code>{self.chat_id}</code>\n"
+            f"✅ You are the authorized owner."
         )
 
     async def _cmd_stop(self, args) -> str:
