@@ -335,9 +335,7 @@ class BollingerBreakoutSignalBot:
         equity = await self.client.get_account_equity()
         self.daily_state.reset(equity, datetime.now(timezone.utc))
 
-        # Telegram start notification (first symbol only)
-        if self.cfg.telegram_enabled:
-            self.notifier.send_startup_message([self.cfg.symbol])
+        # Telegram start notification — handled by run_all_symbols()
 
         # Start Telegram command handler
         if self.cmd_handler:
@@ -1060,6 +1058,23 @@ async def run_symbol(symbol: str, web_enabled: bool = False):
 async def run_all_symbols():
     logger.info("🚀 Starting BBPro Signal Bot Ultimate v3 — %d symbols: %s",
                 len(ALL_SYMBOLS), ", ".join(ALL_SYMBOLS))
+
+    # Send ONE combined startup message for all symbols
+    try:
+        from config import load_config
+        cfg = load_config()
+        from notifications.telegram import create_notifier
+        notifier = create_notifier(
+            cfg.telegram_bot_token,
+            cfg.telegram_chat_id,
+            cfg.telegram_enabled,
+        )
+        # Count total strategies (8 available strategies, ~3-4 enabled per symbol)
+        total_strategies = 8  # breakout, rsi_reversal, ema_crossover, sr_bounce, bb_mean_reversion, macd, stochastic, adx
+        notifier.send_startup_message(ALL_SYMBOLS, total_strategies)
+    except Exception as e:
+        logger.warning("Failed to send combined startup message: %s", e)
+
     tasks = [
         asyncio.create_task(run_symbol(sym, web_enabled=(i == 0)))
         for i, sym in enumerate(ALL_SYMBOLS)

@@ -219,14 +219,15 @@ class TelegramNotifier:
         return self.send(msg)
 
     # ── Startup message ──────────────────────────────────────────────────
-    def send_startup_message(self, symbols: list) -> bool:
+    def send_startup_message(self, symbols: list, strategy_count: int = 0) -> bool:
         now_utc = datetime.now(timezone.utc).strftime("%H:%M UTC")
         symbols_str = " · ".join(symbols)
+        strat_count = strategy_count if strategy_count > 0 else len(symbols)
         msg = (
             f"🤖 BBPro Signal Bot — نشط الآن\n"
             f"📡 الأزواج: {symbols_str}\n"
             f"🎯 وضع التوصيات فقط\n"
-            f"🚀 {len(symbols)} استراتيجيات نشطة\n"
+            f"🚀 {strat_count} استراتيجيات نشطة\n"
             f"📊 Multi-TF + Candlestick + Economic Calendar\n"
             f"🕐 {now_utc}"
         )
