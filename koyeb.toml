@@ -1,0 +1,6 @@
+[deploy]
+  ports = ["8080/http"]
+  healthchecks = [{ type = "tcp", port = "8080" }]
+[env]
+  SIGNAL_ONLY_MODE = "true"
+  PORT = "8080"

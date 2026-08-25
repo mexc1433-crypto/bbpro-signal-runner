@@ -1,0 +1,9 @@
+apps:
+  - name: bbpro-signal-bot
+    type: web
+    env: docker
+    port: 8080
+    healthCheckPath: /health
+    envVars:
+      - key: SIGNAL_ONLY_MODE
+        value: "true"

@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/tick.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "api/health.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/health",
+      "dest": "/api/health.py"
+    },
+    {
+      "src": "/tick",
+      "dest": "/api/tick.py"
+    },
+    {
+      "src": "/",
+      "dest": "/api/health.py"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/tick.py",
+      "schedule": "*/2 * * * *"
+    }
+  ]
+}
