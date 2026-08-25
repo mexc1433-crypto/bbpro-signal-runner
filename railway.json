@@ -5,9 +5,7 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "python -O bot/main.py",
-    "healthcheckPath": "/health",
-    "healthcheckTimeout": 30,
+    "startCommand": "python -O main.py",
     "restartPolicyType": "ON_FAILURE",
     "restartMaxRetries": 10
   }
