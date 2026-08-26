@@ -60,6 +60,7 @@ class BBProSignalBot:
         self.signal_history: List[Dict] = []
         self.public_channel = PUBLIC_CHANNEL_ID
         self.private_channel = PRIVATE_CHANNEL_ID
+        self._app = None  # Reference to the telegram Application
 
         logger.info("BBPro Signal Bot initialized")
 
@@ -98,7 +99,6 @@ class BBProSignalBot:
 
                 # Skip if trade type doesn't match (when filtering)
                 if trade_type != "ALL" and strat_trade_type != trade_type:
-                    # For MEDIUM strategies, allow them in MEDIUM scan
                     if trade_type == "MEDIUM" and strat_trade_type == "MEDIUM":
                         pass
                     elif trade_type == "SWING" and strat_trade_type == "SWING":
@@ -267,100 +267,74 @@ class BBProSignalBot:
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /start"""
-        welcome = (
-            "🤖 مرحباً بك في BBPro Signal Bot\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📊 بوت إشارات تداول العملات الرقمية\n"
-            "⚡ 8 استراتيجيات تداول متقدمة\n"
-            "📈 17+ مؤشر فني\n"
-            "🎯 3 أنواع صفقات (سريع/متوسط/بعيد)\n"
-            "💰 تقسيم حسب رأس المال ($10 - $1000+)\n"
-            "🛡️ إدارة مخاطر متقدمة\n\n"
-            "📋 الأوامر المتاحة:\n"
+        await update.message.reply_text(
+            "🤖 **BBPro Signal Bot**\n\n"
+            "بوت إشارات تداول العملات الرقمية\n"
+            "📊 8 استراتيجيات | 17+ مؤشر\n"
+            "⚡ 3 أنواع صفقات: سريع / متوسط / بعيد\n\n"
+            "الأوامر المتاحة:\n"
             "/help - المساعدة\n"
             "/status - حالة البوت\n"
-            "/scan - مسح فوري\n"
+            "/scan - مسح فوري للسوق\n"
             "/analysis - تحليل السوق\n"
-            "/summary - ملخص الإشارات\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "⚠️ ليست نصيحة استثمارية"
+            "/summary - ملخص الإشارات"
         )
-        await update.message.reply_text(welcome)
 
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /help"""
-        help_text = (
-            "📋 دليل BBPro Signal Bot\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "📊 الاستراتيجيات (8):\n"
-            "• تتبع الاتجاه (EMA+ADX+MACD)\n"
-            "• العودة للمتوسط (BB+RSI+Stoch)\n"
-            "• الزخم (MACD+RSI+Vol+MFI)\n"
-            "• الاختراق (Squeeze+Vol+ADX)\n"
-            "• السكالبينج السريع (RSI7+EMA+Stoch+WR)\n"
-            "• السوينج (Ichimoku+Fib+EMA+ADX)\n"
-            "• السوبر ترند (ST+ATR+ADX)\n"
-            "• التقاء متعدد (10 مؤشرات)\n\n"
-            "📈 المؤشرات (17+):\n"
-            "RSI, MACD, Bollinger, EMA, SMA, Stochastic,\n"
-            "ATR, ADX, Ichimoku, VWAP, Fibonacci, Williams %R,\n"
-            "CCI, MFI, OBV, Parabolic SAR, SuperTrend\n\n"
-            "⚡ أنواع الصفقات:\n"
-            "• سريع (5m/15m) - ربح 0.5-1.2%\n"
-            "• متوسط (1h/4h) - ربح 1.5-4%\n"
-            "• بعيد (1d) - ربح 3-8%\n\n"
-            "💰 رأس المال: $10 → $1000+\n\n"
-            "📡 القنوات:\n"
-            "• العامة: 1-3 إشارات (سريع+متوسط) ربح صغير\n"
-            "• الخاصة: 1-10 إشارات (متوسط+بعيد) ربح كبير\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "⚠️ ليست نصيحة استثمارية"
+        await update.message.reply_text(
+            "📋 **مساعدة BBPro Signal Bot**\n\n"
+            "الأوامر:\n"
+            "/start - بدء البوت\n"
+            "/status - حالة البوت والإعدادات\n"
+            "/scan - مسح فوري للسوق\n"
+            "/analysis - تحليل شامل للسوق\n"
+            "/summary - ملخص إشارات اليوم\n\n"
+            "الاستراتيجيات:\n"
+            "• Trend Following\n"
+            "• Mean Reversion\n"
+            "• Momentum\n"
+            "• Breakout\n"
+            "• Scalping\n"
+            "• Swing\n"
+            "• Supertrend\n"
+            "• Multi-Confluence\n\n"
+            "أنواع الصفقات:\n"
+            "⚡ سريع (Scalping) - 1-3 دقائق\n"
+            "📊 متوسط (Medium) - ساعة لعدة ساعات\n"
+            "🎯 بعيد (Swing) - أيام لأسابيع"
         )
-        await update.message.reply_text(help_text)
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /status"""
-        stats = self.channel_manager.get_daily_stats()
         status = (
-            "📊 حالة BBPro Signal Bot\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🟢 البوت: يعمل\n"
-            f"💱 المنصة: {EXCHANGE_NAME.upper()}\n"
-            f"📊 الأزواج: {len(TRADING_PAIRS)}\n"
-            f"📈 الاستراتيجيات: 8\n"
-            f"📏 المؤشرات: 17+\n\n"
-            f"📋 إشارات اليوم:\n"
-            f"  العامة: {stats['public_count']}/{stats['public_max']}\n"
-            f"  الخاصة: {stats['private_count']}/{stats['private_max']}\n"
-            f"  الإجمالي: {stats['public_count'] + stats['private_count']}\n\n"
-            f"📊 إجمالي الإشارات: {len(self.signal_history)}\n"
-            f"📅 الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            "📊 **حالة BBPro Signal Bot**\n\n"
+            f"البورصة: {EXCHANGE_NAME.upper()}\n"
+            f"الأزواج: {len(TRADING_PAIRS)}\n"
+            f"الاستراتيجيات: 8\n"
+            f"المؤشرات: 17+\n"
+            f"القناة العامة: {'✅' if PUBLIC_CHANNEL_ID else '❌'}\n"
+            f"القناة الخاصة: {'✅' if PRIVATE_CHANNEL_ID else '❌'}\n\n"
+            f"إشارات اليوم: {len(self.signal_history)}\n"
+            f"الحالة: 🟢 يعمل"
         )
         await update.message.reply_text(status)
 
     async def cmd_scan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /scan - مسح فوري"""
-        if update.effective_user.id != ADMIN_ID:
-            await update.message.reply_text("⛔ هذا الأمر للمشرف فقط")
-            return
-
-        await update.message.reply_text("🔄 بدء المسح الفوري لكل الأزواج...")
+        await update.message.reply_text("🔄 جاري مسح السوق...这可能需要几分钟")
+        logger.info(f"Manual scan requested by {update.effective_user.id}")
         signals = self.scan_market("ALL")
         if signals:
             await self.process_signals(signals)
-            await update.message.reply_text(
-                f"✅ تم العثور على {len(signals)} إشارة وتم إرسالها"
-            )
+            await update.message.reply_text(f"✅ تم العثور على {len(signals)} إشارة!")
         else:
             await update.message.reply_text("⚠️ لا توجد إشارات في الوقت الحالي")
 
     async def cmd_analysis(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /analysis"""
         await update.message.reply_text("📊 جاري تحليل السوق...")
-        sentiment = self.analyzer.analyze_market_sentiment()
-        message = format_analysis_message(sentiment)
-        await update.message.reply_text(message, parse_mode='HTML')
+        await self.send_market_analysis()
 
     async def cmd_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /summary"""
@@ -371,34 +345,47 @@ class BBProSignalBot:
         await update.message.reply_text(message, parse_mode='HTML')
 
     # ═══════════════════════════════════════════════════════════
-    # Scheduler
+    # Scheduler — FIXED: uses asyncio.create_task instead of new event loop
     # ═══════════════════════════════════════════════════════════
 
-    def run_async_job(self, coro_func):
-        """يشغل coroutine job في الـ event loop"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    def _schedule_async(self, coro_func):
+        """يضيف coroutine task للـ event loop النشط (بلا ما يفتح loop جديد)"""
         try:
-            loop.run_until_complete(coro_func())
-        except Exception as e:
-            logger.error(f"Job error: {e}")
-        finally:
-            loop.close()
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(coro_func(), loop=loop)
+            else:
+                loop.run_until_complete(coro_func())
+        except RuntimeError:
+            # لو مفيش loop نشط، نفتح واحد
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(coro_func())
+            except Exception as e:
+                logger.error(f"Job error: {e}")
+            finally:
+                loop.close()
 
     def scheduled_scalping(self):
-        self.run_async_job(self.run_scalping_scan)
+        logger.info("⏰ Scalping schedule triggered")
+        self._schedule_async(self.run_scalping_scan)
 
     def scheduled_medium(self):
-        self.run_async_job(self.run_medium_scan)
+        logger.info("⏰ Medium schedule triggered")
+        self._schedule_async(self.run_medium_scan)
 
     def scheduled_swing(self):
-        self.run_async_job(self.run_swing_scan)
+        logger.info("⏰ Swing schedule triggered")
+        self._schedule_async(self.run_swing_scan)
 
     def scheduled_analysis(self):
-        self.run_async_job(self.send_market_analysis)
+        logger.info("⏰ Analysis schedule triggered")
+        self._schedule_async(self.send_market_analysis)
 
     def scheduled_summary(self):
-        self.run_async_job(self.send_daily_summary)
+        logger.info("⏰ Daily summary schedule triggered")
+        self._schedule_async(self.send_daily_summary)
 
     # ═══════════════════════════════════════════════════════════
     # Main Run
@@ -434,6 +421,7 @@ class BBProSignalBot:
 
         # Setup Telegram commands
         app = Application.builder().token(BOT_TOKEN).build()
+        self._app = app
 
         app.add_handler(CommandHandler("start", self.cmd_start))
         app.add_handler(CommandHandler("help", self.cmd_help))
@@ -442,8 +430,17 @@ class BBProSignalBot:
         app.add_handler(CommandHandler("analysis", self.cmd_analysis))
         app.add_handler(CommandHandler("summary", self.cmd_summary))
 
-        # Run scheduler in background
+        # Run scheduler in background — داخل الـ event loop النشط
         async def run_scheduler(app):
+            # أول scan فوري بعد 30 ثانية من الإطلاق
+            logger.info("⏱️ Initial scan in 30 seconds...")
+            await asyncio.sleep(30)
+            logger.info("🔄 Running initial scalping scan...")
+            await self.run_scalping_scan()
+            logger.info("🔄 Running initial medium scan...")
+            await self.run_medium_scan()
+
+            # بعدها الجدولة العادية
             while True:
                 schedule.run_pending()
                 await asyncio.sleep(30)
@@ -451,7 +448,11 @@ class BBProSignalBot:
         async def post_init(app):
             await self.bot.send_message(
                 chat_id=PRIVATE_CHANNEL_ID or PUBLIC_CHANNEL_ID,
-                text="🤖 BBPro Signal Bot بدأ العمل!\n\n✅ جميع الأنظمة جاهزة\n📊 8 استراتيجيات | 17+ مؤشر\n⏱️ المسح التلقائي مفعّل"
+                text="🤖 BBPro Signal Bot بدأ العمل!\n\n"
+                     "✅ جميع الأنظمة جاهزة\n"
+                     "📊 8 استراتيجيات | 17+ مؤشر\n"
+                     "⏱️ المسح التلقائي مفعّل\n"
+                     "🔄 أول مسح بعد 30 ثانية"
             )
             asyncio.create_task(run_scheduler(app))
 
