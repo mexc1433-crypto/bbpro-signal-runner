@@ -1,6 +1,6 @@
 """
 BBPro Signal Bot - Trading Strategies
-8 استراتيجيات تداول متقدمة
+13 استراتيجيات تداول متقدمة
 """
 import pandas as pd
 import numpy as np
@@ -889,6 +889,499 @@ def multi_confluence_strategy(df: pd.DataFrame, symbol: str, trade_type: str = "
 
 
 # ═══════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════
+# 9. VWAP Strategy
+# ═══════════════════════════════════════════════════════════════
+
+def vwap_strategy(df: pd.DataFrame, symbol: str, trade_type: str = "MEDIUM") -> Optional[Dict]:
+    """
+    استراتيجية VWAP - متوسط السعر المرجح بالحجم
+    BUY: السعر أكبر من VWAP ويرتد صعوداً
+    SELL: السعر أصغر من VWAP ويرفض الارتفاع
+    تعتمد الثقة على المسافة من VWAP وحجم التداول
+    """
+    if len(df) < 30:
+        return None
+
+    ind = calculate_all_indicators(df)
+    price = df['close'].iloc[-1]
+    prev_close = df['close'].iloc[-2]
+    prev_low = df['low'].iloc[-2]
+    prev_high = df['high'].iloc[-2]
+
+    vwap_series = ind['vwap']
+    vwap_val = vwap_series.iloc[-1]
+    vwap_prev = vwap_series.iloc[-2]
+
+    if pd.isna(vwap_val) or vwap_val <= 0:
+        return None
+
+    vol_avg = df['volume'].rolling(20).mean().iloc[-1]
+    current_vol = df['volume'].iloc[-1]
+
+    distance_pct = abs(price - vwap_val) / vwap_val * 100
+
+    confidence = 0
+    reasoning_parts = []
+
+    # Bounce check for BUY: touched or stayed near/below VWAP previously, now above
+    is_bouncing = (prev_low <= vwap_prev * 1.003 or prev_close <= vwap_prev) and (price > vwap_val)
+    
+    # Reject check for SELL: touched or stayed near/above VWAP previously, now below
+    is_rejecting = (prev_high >= vwap_prev * 0.997 or prev_close >= vwap_prev) and (price < vwap_val)
+
+    if price > vwap_val and is_bouncing:
+        confidence = 65
+        reasoning_parts.append(f"السعر ({price:.6f}) أعلى من VWAP ({vwap_val:.6f}) مع ارتداد صاعد")
+
+        if distance_pct <= 1.0:
+            confidence += 10
+            reasoning_parts.append(f"ارتداد من مسافة قريبة جداً من VWAP ({distance_pct:.2f}%)")
+        elif distance_pct <= 2.5:
+            confidence += 5
+            reasoning_parts.append(f"مسافة ارتداد مناسبة من VWAP ({distance_pct:.2f}%)")
+
+        if current_vol > vol_avg * 1.5:
+            confidence += 10
+            reasoning_parts.append(f"حجم تداول مرتفع يؤكد الارتداد ({current_vol/vol_avg:.1f}x المتوسط)")
+        elif current_vol > vol_avg * 1.1:
+            confidence += 5
+            reasoning_parts.append("حجم تداول أعلى من المتوسط")
+
+        targets = TRADE_TARGETS[trade_type]
+        tp1 = price * (1 + targets['tp1_pct'] / 100)
+        tp2 = price * (1 + targets['tp2_pct'] / 100)
+        tp3 = price * (1 + targets['tp3_pct'] / 100)
+        sl = min(vwap_val * 0.995, price * (1 - targets['sl_pct'] / 100))
+
+        risk_level = "LOW" if confidence >= 75 else "MEDIUM"
+        return _make_signal(
+            "VWAP Strategy", "BUY", min(confidence, 92),
+            ["VWAP", "Volume", "Price Action"],
+            price, sl, tp1, tp2, tp3, risk_level, trade_type,
+            " • ".join(reasoning_parts)
+        )
+
+    elif price < vwap_val and is_rejecting:
+        confidence = 65
+        reasoning_parts.append(f"السعر ({price:.6f}) أدنى من VWAP ({vwap_val:.6f}) مع رفض صعودي")
+
+        if distance_pct <= 1.0:
+            confidence += 10
+            reasoning_parts.append(f"رفض من مسافة قريبة جداً من VWAP ({distance_pct:.2f}%)")
+        elif distance_pct <= 2.5:
+            confidence += 5
+            reasoning_parts.append(f"مسافة رفض مناسبة من VWAP ({distance_pct:.2f}%)")
+
+        if current_vol > vol_avg * 1.5:
+            confidence += 10
+            reasoning_parts.append(f"حجم تداول مرتفع يؤكد الرفض ({current_vol/vol_avg:.1f}x المتوسط)")
+        elif current_vol > vol_avg * 1.1:
+            confidence += 5
+            reasoning_parts.append("حجم تداول أعلى من المتوسط")
+
+        targets = TRADE_TARGETS[trade_type]
+        tp1 = price * (1 - targets['tp1_pct'] / 100)
+        tp2 = price * (1 - targets['tp2_pct'] / 100)
+        tp3 = price * (1 - targets['tp3_pct'] / 100)
+        sl = max(vwap_val * 1.005, price * (1 + targets['sl_pct'] / 100))
+
+        risk_level = "LOW" if confidence >= 75 else "MEDIUM"
+        return _make_signal(
+            "VWAP Strategy", "SELL", min(confidence, 92),
+            ["VWAP", "Volume", "Price Action"],
+            price, sl, tp1, tp2, tp3, risk_level, trade_type,
+            " • ".join(reasoning_parts)
+        )
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# 10. Ichimoku Cloud Strategy
+# ═══════════════════════════════════════════════════════════════
+
+def ichimoku_cloud_strategy(df: pd.DataFrame, symbol: str, trade_type: str = "SWING") -> Optional[Dict]:
+    """
+    استراتيجية سحابة إيشيموكو - Ichimoku Cloud Strategy
+    BUY: السعر أعلى السحابة (Senkou A > Senkou B) و Tenkan > Kijun
+    SELL: السعر أسفل السحابة (Senkou A < Senkou B) و Tenkan < Kijun
+    استراتيجية ذات ثقة عالية (High Confidence)
+    """
+    if len(df) < 52:
+        return None
+
+    ind = calculate_all_indicators(df)
+    ich = ind['ichimoku']
+    price = df['close'].iloc[-1]
+
+    tenkan = ich['tenkan'].iloc[-1]
+    kijun = ich['kijun'].iloc[-1]
+    senkou_a = ich['senkou_a'].iloc[-1]
+    senkou_b = ich['senkou_b'].iloc[-1]
+
+    tenkan_prev = ich['tenkan'].iloc[-2]
+    kijun_prev = ich['kijun'].iloc[-2]
+
+    if pd.isna(senkou_a) or pd.isna(senkou_b) or pd.isna(tenkan) or pd.isna(kijun):
+        return None
+
+    cloud_top = max(senkou_a, senkou_b)
+    cloud_bottom = min(senkou_a, senkou_b)
+
+    confidence = 0
+    reasoning_parts = []
+
+    # BUY: price > cloud (Senkou A > Senkou B) and Tenkan > Kijun
+    if price > cloud_top and senkou_a > senkou_b and tenkan > kijun:
+        confidence = 78  # High confidence base strategy
+        reasoning_parts.append(f"السعر ({price:.6f}) أعلى السحابة الخضراء (Senkou A > Senkou B)")
+        reasoning_parts.append(f"Tenkan ({tenkan:.6f}) فوق Kijun ({kijun:.6f})")
+
+        if tenkan_prev <= kijun_prev and tenkan > kijun:
+            confidence += 10
+            reasoning_parts.append("تقاطع Tenkan/Kijun صاعد حديث (TK Cross)")
+
+        if price > cloud_top * 1.005:
+            confidence += 5
+            reasoning_parts.append("اختراق واضح وتأكيد فوق السحابة")
+
+        targets = TRADE_TARGETS[trade_type]
+        tp1 = price * (1 + targets['tp1_pct'] / 100)
+        tp2 = price * (1 + targets['tp2_pct'] / 100)
+        tp3 = price * (1 + targets['tp3_pct'] / 100)
+        sl = min(kijun, cloud_bottom)
+        if sl >= price:
+            sl = price * (1 - targets['sl_pct'] / 100)
+
+        risk_level = "LOW" if confidence >= 80 else "MEDIUM"
+        return _make_signal(
+            "Ichimoku Cloud Strategy", "BUY", min(confidence, 95),
+            ["Ichimoku Cloud", "Tenkan/Kijun", "Senkou A/B"],
+            price, sl, tp1, tp2, tp3, risk_level, trade_type,
+            " • ".join(reasoning_parts)
+        )
+
+    # SELL: price < cloud (Senkou A < Senkou B) and Tenkan < Kijun
+    elif price < cloud_bottom and senkou_a < senkou_b and tenkan < kijun:
+        confidence = 78  # High confidence base strategy
+        reasoning_parts.append(f"السعر ({price:.6f}) أسفل السحابة الحمراء (Senkou A < Senkou B)")
+        reasoning_parts.append(f"Tenkan ({tenkan:.6f}) تحت Kijun ({kijun:.6f})")
+
+        if tenkan_prev >= kijun_prev and tenkan < kijun:
+            confidence += 10
+            reasoning_parts.append("تقاطع Tenkan/Kijun هابط حديث (TK Cross)")
+
+        if price < cloud_bottom * 0.995:
+            confidence += 5
+            reasoning_parts.append("كسر واضح وتأكيد أسفل السحابة")
+
+        targets = TRADE_TARGETS[trade_type]
+        tp1 = price * (1 - targets['tp1_pct'] / 100)
+        tp2 = price * (1 - targets['tp2_pct'] / 100)
+        tp3 = price * (1 - targets['tp3_pct'] / 100)
+        sl = max(kijun, cloud_top)
+        if sl <= price:
+            sl = price * (1 + targets['sl_pct'] / 100)
+
+        risk_level = "LOW" if confidence >= 80 else "MEDIUM"
+        return _make_signal(
+            "Ichimoku Cloud Strategy", "SELL", min(confidence, 95),
+            ["Ichimoku Cloud", "Tenkan/Kijun", "Senkou A/B"],
+            price, sl, tp1, tp2, tp3, risk_level, trade_type,
+            " • ".join(reasoning_parts)
+        )
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# 11. CCI + Williams %R Strategy
+# ═══════════════════════════════════════════════════════════════
+
+def cci_williams_strategy(df: pd.DataFrame, symbol: str, trade_type: str = "MEDIUM") -> Optional[Dict]:
+    """
+    استراتيجية CCI + Williams %R
+    BUY: CCI < -100 (تشبع بيعي) و Williams %R < -80
+    SELL: CCI > 100 (تشبع شرائي) و Williams %R > -20
+    """
+    if len(df) < 30:
+        return None
+
+    ind = calculate_all_indicators(df)
+    price = df['close'].iloc[-1]
+
+    cci_series = ind['cci']
+    wr_series = ind['williams_r']
+
+    cci_val = cci_series.iloc[-1]
+    cci_prev = cci_series.iloc[-2]
+    wr_val = wr_series.iloc[-1]
+    wr_prev = wr_series.iloc[-2]
+
+    if pd.isna(cci_val) or pd.isna(wr_val):
+        return None
+
+    confidence = 0
+    reasoning_parts = []
+
+    # BUY: CCI < -100 and Williams %R < -80
+    if cci_val < -100 and wr_val < -80:
+        confidence = 64
+        reasoning_parts.append(f"CCI في منطقة تشبع بيعي ({cci_val:.1f} < -100)")
+        reasoning_parts.append(f"Williams %R في منطقة تشبع بيعي ({wr_val:.1f}% < -80%)")
+
+        if cci_val < -150 or wr_val < -90:
+            confidence += 9
+            reasoning_parts.append("تشبع بيعي حاد جداً يوحي بانعكاس قريب")
+
+        if cci_val > cci_prev and wr_val > wr_prev:
+            confidence += 9
+            reasoning_parts.append("بدء ارتداد إيجابي صاعد في المؤشرين")
+
+        targets = TRADE_TARGETS[trade_type]
+        tp1 = price * (1 + targets['tp1_pct'] / 100)
+        tp2 = price * (1 + targets['tp2_pct'] / 100)
+        tp3 = price * (1 + targets['tp3_pct'] / 100)
+        sl = price * (1 - targets['sl_pct'] / 100)
+
+        risk_level = "MEDIUM" if confidence < 75 else "LOW"
+        return _make_signal(
+            "CCI + Williams %R Strategy", "BUY", min(confidence, 88),
+            ["CCI (20)", "Williams %R (14)"],
+            price, sl, tp1, tp2, tp3, risk_level, trade_type,
+            " • ".join(reasoning_parts)
+        )
+
+    # SELL: CCI > 100 and Williams %R > -20
+    elif cci_val > 100 and wr_val > -20:
+        confidence = 64
+        reasoning_parts.append(f"CCI في منطقة تشبع شرائي ({cci_val:.1f} > 100)")
+        reasoning_parts.append(f"Williams %R في منطقة تشبع شرائي ({wr_val:.1f}% > -20%)")
+
+        if cci_val > 150 or wr_val > -10:
+            confidence += 9
+            reasoning_parts.append("تشبع شرائي حاد جداً يوحي بانعكاس قريب")
+
+        if cci_val < cci_prev and wr_val < wr_prev:
+            confidence += 9
+            reasoning_parts.append("بدء تصحيح هابط في المؤشرين")
+
+        targets = TRADE_TARGETS[trade_type]
+        tp1 = price * (1 - targets['tp1_pct'] / 100)
+        tp2 = price * (1 - targets['tp2_pct'] / 100)
+        tp3 = price * (1 - targets['tp3_pct'] / 100)
+        sl = price * (1 + targets['sl_pct'] / 100)
+
+        risk_level = "MEDIUM" if confidence < 75 else "LOW"
+        return _make_signal(
+            "CCI + Williams %R Strategy", "SELL", min(confidence, 88),
+            ["CCI (20)", "Williams %R (14)"],
+            price, sl, tp1, tp2, tp3, risk_level, trade_type,
+            " • ".join(reasoning_parts)
+        )
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# 12. Parabolic SAR Strategy
+# ═══════════════════════════════════════════════════════════════
+
+def parabolic_sar_strategy(df: pd.DataFrame, symbol: str, trade_type: str = "MEDIUM") -> Optional[Dict]:
+    """
+    استراتيجية Parabolic SAR + ADX
+    BUY: انقلاب PSAR من أعلى السعر إلى أسفله (Bullish flip) مع فلتر ADX للاتجاه
+    SELL: انقلاب PSAR من أسفل السعر إلى أعلاه (Bearish flip) مع فلتر ADX للاتجاه
+    """
+    if len(df) < 30:
+        return None
+
+    ind = calculate_all_indicators(df)
+    price = df['close'].iloc[-1]
+    prev_price = df['close'].iloc[-2]
+
+    psar_series = ind['psar']
+    psar_curr = psar_series.iloc[-1]
+    psar_prev = psar_series.iloc[-2]
+
+    adx_val = ind['adx'].iloc[-1]
+
+    if pd.isna(psar_curr) or pd.isna(psar_prev) or pd.isna(adx_val):
+        return None
+
+    # Bullish flip: prev PSAR was above prev price, curr PSAR is below curr price
+    bullish_flip = (psar_prev > prev_price) and (psar_curr < price)
+
+    # Bearish flip: prev PSAR was below prev price, curr PSAR is above curr price
+    bearish_flip = (psar_prev < prev_price) and (psar_curr > price)
+
+    confidence = 0
+    reasoning_parts = []
+
+    if bullish_flip and adx_val > 20:
+        confidence = 66
+        reasoning_parts.append(f"انقلاب Parabolic SAR لصالح الشراء (SAR={psar_curr:.6f} < السعر)")
+        reasoning_parts.append(f"مؤشر ADX يؤكد قوة الاتجاه ({adx_val:.0f} > 20)")
+
+        if adx_val > 30:
+            confidence += 10
+            reasoning_parts.append(f"اتجاه قوي جداً (ADX {adx_val:.0f})")
+        elif adx_val > 25:
+            confidence += 5
+
+        ema50 = ind['ema_50'].iloc[-1] if 'ema_50' in ind else None
+        if ema50 is not None and price > ema50:
+            confidence += 8
+            reasoning_parts.append("السعر فوق EMA 50 (محاذاة الاتجاه)")
+
+        targets = TRADE_TARGETS[trade_type]
+        tp1 = price * (1 + targets['tp1_pct'] / 100)
+        tp2 = price * (1 + targets['tp2_pct'] / 100)
+        tp3 = price * (1 + targets['tp3_pct'] / 100)
+        sl = min(psar_curr, price * (1 - targets['sl_pct'] / 100))
+
+        risk_level = "LOW" if confidence >= 75 else "MEDIUM"
+        return _make_signal(
+            "Parabolic SAR Strategy", "BUY", min(confidence, 90),
+            ["Parabolic SAR", "ADX", "EMA 50"],
+            price, sl, tp1, tp2, tp3, risk_level, trade_type,
+            " • ".join(reasoning_parts)
+        )
+
+    elif bearish_flip and adx_val > 20:
+        confidence = 66
+        reasoning_parts.append(f"انقلاب Parabolic SAR لصالح البيع (SAR={psar_curr:.6f} > السعر)")
+        reasoning_parts.append(f"مؤشر ADX يؤكد قوة الاتجاه الهابط ({adx_val:.0f} > 20)")
+
+        if adx_val > 30:
+            confidence += 10
+            reasoning_parts.append(f"اتجاه هابط قوي جداً (ADX {adx_val:.0f})")
+        elif adx_val > 25:
+            confidence += 5
+
+        ema50 = ind['ema_50'].iloc[-1] if 'ema_50' in ind else None
+        if ema50 is not None and price < ema50:
+            confidence += 8
+            reasoning_parts.append("السعر تحت EMA 50 (محاذاة الاتجاه)")
+
+        targets = TRADE_TARGETS[trade_type]
+        tp1 = price * (1 - targets['tp1_pct'] / 100)
+        tp2 = price * (1 - targets['tp2_pct'] / 100)
+        tp3 = price * (1 - targets['tp3_pct'] / 100)
+        sl = max(psar_curr, price * (1 + targets['sl_pct'] / 100))
+
+        risk_level = "LOW" if confidence >= 75 else "MEDIUM"
+        return _make_signal(
+            "Parabolic SAR Strategy", "SELL", min(confidence, 90),
+            ["Parabolic SAR", "ADX", "EMA 50"],
+            price, sl, tp1, tp2, tp3, risk_level, trade_type,
+            " • ".join(reasoning_parts)
+        )
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# 13. Volume Breakout Strategy
+# ═══════════════════════════════════════════════════════════════
+
+def volume_breakout_strategy(df: pd.DataFrame, symbol: str, trade_type: str = "SWING") -> Optional[Dict]:
+    """
+    استراتيجية اختراق الحجم - OBV + Volume Surge + Breakout
+    BUY: اختراق OBV + ارتفاع حجم التداول + اختراق أعلى قمة سابقة
+    SELL: كسر OBV + ارتفاع حجم التداول + كسر أدنى قاع سابق
+    """
+    if len(df) < 30:
+        return None
+
+    ind = calculate_all_indicators(df)
+    price = df['close'].iloc[-1]
+
+    obv_series = ind['obv']
+    obv_curr = obv_series.iloc[-1]
+    obv_high = obv_series.rolling(20).max().iloc[-2]
+    obv_low = obv_series.rolling(20).min().iloc[-2]
+
+    vol_avg = df['volume'].rolling(20).mean().iloc[-1]
+    current_vol = df['volume'].iloc[-1]
+
+    recent_high = df['high'].rolling(20).max().iloc[-2]
+    recent_low = df['low'].rolling(20).min().iloc[-2]
+
+    if pd.isna(obv_curr) or pd.isna(obv_high) or pd.isna(obv_low) or vol_avg <= 0:
+        return None
+
+    volume_surge = current_vol > vol_avg * 1.3
+    obv_breakout = obv_curr > obv_high
+    obv_breakdown = obv_curr < obv_low
+    price_breakout = price > recent_high
+    price_breakdown = price < recent_low
+
+    confidence = 0
+    reasoning_parts = []
+
+    # BUY: OBV breaks out + volume surge + price breaks recent high
+    if price_breakout and volume_surge and obv_breakout:
+        confidence = 68
+        reasoning_parts.append(f"اختراق قمة 20 شمعة ({price:.6f} > {recent_high:.6f})")
+        reasoning_parts.append(f"ارتفاع حجم التداول ({current_vol/vol_avg:.1f}x المتوسط)")
+        reasoning_parts.append("مؤشر OBV يسجل قمة جديدة مؤكداً التدفق الشرائي")
+
+        if current_vol > vol_avg * 2.0:
+            confidence += 10
+            reasoning_parts.append("حجم اختراق استثنائي (Surge > 2.0x)")
+        elif current_vol > vol_avg * 1.6:
+            confidence += 5
+
+        if obv_high > 0 and obv_curr > obv_high * 1.05:
+            confidence += 8
+            reasoning_parts.append("اختراق OBV قوي جداً")
+
+        targets = TRADE_TARGETS[trade_type]
+        tp1 = price * (1 + targets['tp1_pct'] / 100)
+        tp2 = price * (1 + targets['tp2_pct'] / 100)
+        tp3 = price * (1 + targets['tp3_pct'] / 100)
+        sl = recent_low
+
+        risk_level = "LOW" if confidence >= 78 else "MEDIUM"
+        return _make_signal(
+            "Volume Breakout Strategy", "BUY", min(confidence, 92),
+            ["OBV", "Volume", "Price Breakout"],
+            price, sl, tp1, tp2, tp3, risk_level, trade_type,
+            " • ".join(reasoning_parts)
+        )
+
+    # SELL: OBV breaks down + volume surge + price breaks recent low
+    elif price_breakdown and volume_surge and obv_breakdown:
+        confidence = 68
+        reasoning_parts.append(f"كسر قاع 20 شمعة ({price:.6f} < {recent_low:.6f})")
+        reasoning_parts.append(f"ارتفاع حجم التداول ({current_vol/vol_avg:.1f}x المتوسط)")
+        reasoning_parts.append("مؤشر OBV يسجل قاع جديد مؤكداً التدفق البيعي")
+
+        if current_vol > vol_avg * 2.0:
+            confidence += 10
+            reasoning_parts.append("حجم كسر استثنائي (Surge > 2.0x)")
+        elif current_vol > vol_avg * 1.6:
+            confidence += 5
+
+        targets = TRADE_TARGETS[trade_type]
+        tp1 = price * (1 - targets['tp1_pct'] / 100)
+        tp2 = price * (1 - targets['tp2_pct'] / 100)
+        tp3 = price * (1 - targets['tp3_pct'] / 100)
+        sl = recent_high
+
+        risk_level = "LOW" if confidence >= 78 else "MEDIUM"
+        return _make_signal(
+            "Volume Breakout Strategy", "SELL", min(confidence, 92),
+            ["OBV", "Volume", "Price Breakout"],
+            price, sl, tp1, tp2, tp3, risk_level, trade_type,
+            " • ".join(reasoning_parts)
+        )
+
+    return None
+
 # Strategy Registry
 # ═══════════════════════════════════════════════════════════════
 
@@ -932,5 +1425,30 @@ ALL_STRATEGIES = {
         "func": multi_confluence_strategy,
         "trade_type": "MEDIUM",
         "name_ar": "التقاء متعدد (الإشارة الملكية)",
+    },
+    "vwap": {
+        "func": vwap_strategy,
+        "trade_type": "MEDIUM",
+        "name_ar": "استراتيجية VWAP",
+    },
+    "ichimoku": {
+        "func": ichimoku_cloud_strategy,
+        "trade_type": "SWING",
+        "name_ar": "سحابة إيشيموكو",
+    },
+    "cci_williams": {
+        "func": cci_williams_strategy,
+        "trade_type": "MEDIUM",
+        "name_ar": "CCI و Williams %R",
+    },
+    "parabolic_sar": {
+        "func": parabolic_sar_strategy,
+        "trade_type": "MEDIUM",
+        "name_ar": "Parabolic SAR مع ADX",
+    },
+    "volume_breakout": {
+        "func": volume_breakout_strategy,
+        "trade_type": "SWING",
+        "name_ar": "اختراق الحجم و OBV",
     },
 }

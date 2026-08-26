@@ -1,131 +1,246 @@
 """
 BBPro Signal Bot - Market Data Fetcher
-جلب بيانات السوق من المنصات
+جلب بيانات الذهب (XAU/USD) من Yahoo Finance
 """
-import ccxt
 import pandas as pd
 import numpy as np
 import requests
-import asyncio
 import logging
 import time
 from typing import Dict, List, Optional, Tuple
-from config import (EXCHANGE_NAME, EXCHANGE_API_KEY, EXCHANGE_API_SECRET,
-                    TRADING_PAIRS, FEAR_GREED_API)
+from config import (DATA_SOURCE, GOLD_SYMBOL, GOLD_DISPLAY_NAME,
+                    TRADING_PAIRS, FEAR_GREED_API, VIX_SYMBOL)
+
+try:
+    import yfinance as yf
+    YF_AVAILABLE = True
+except ImportError:
+    YF_AVAILABLE = False
+    logging.error("yfinance not installed! Run: pip install yfinance")
 
 logger = logging.getLogger(__name__)
 
+# Yahoo Finance interval mapping
+YF_INTERVALS = {
+    "5m": "5m",
+    "15m": "15m",
+    "1h": "1h",
+    "4h": "1h",   # yfinance doesn't support 4h, we aggregate from 1h
+    "1d": "1d",
+}
+
+# Period mapping for yfinance (how much history to fetch)
+YF_PERIODS = {
+    "5m": "5d",
+    "15m": "5d",
+    "1h": "30d",
+    "4h": "60d",
+    "1d": "1y",
+}
+
 
 class MarketDataFetcher:
-    """جلب بيانات السوق من المنصات"""
+    """جلب بيانات الذهب من Yahoo Finance"""
 
     def __init__(self, exchange_name: str = None):
-        exchange = exchange_name or EXCHANGE_NAME
-        self.exchange_name = exchange
+        self.exchange_name = exchange_name or "yfinance"
+        self.symbol = GOLD_SYMBOL  # GC=F (Gold Futures)
+        self.display_name = GOLD_DISPLAY_NAME  # XAU/USD
+        logger.info(f"MarketDataFetcher initialized: {self.display_name} via {self.symbol}")
 
-        exchange_class = getattr(ccxt, exchange, ccxt.mexc)
+    def _yf_download(self, yf_symbol: str, timeframe: str, limit: int = 200) -> pd.DataFrame:
+        """يحمل بيانات من Yahoo Finance"""
+        interval = YF_INTERVALS.get(timeframe, "1h")
+        period = YF_PERIODS.get(timeframe, "30d")
 
-        opts = {
-            'enableRateLimit': True,
-            'options': {'defaultType': 'spot'},
-        }
-        if EXCHANGE_API_KEY and EXCHANGE_API_SECRET:
-            opts['apiKey'] = EXCHANGE_API_KEY
-            opts['secret'] = EXCHANGE_API_SECRET
+        try:
+            df = yf.download(yf_symbol, period=period, interval=interval,
+                            progress=False, auto_adjust=False)
 
-        self.exchange = exchange_class(opts)
+            if df.empty:
+                logger.warning(f"yfinance returned empty for {yf_symbol} {timeframe}")
+                return pd.DataFrame()
+
+            # Handle multi-index columns from newer yfinance versions
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+
+            # Normalize column names to lowercase
+            df.columns = [c.lower() for c in df.columns]
+
+            # Ensure we have OHLCV columns
+            needed = ['open', 'high', 'low', 'close', 'volume']
+            for col in needed:
+                if col not in df.columns:
+                    df[col] = np.nan
+
+            df = df[needed].dropna(subset=['open', 'high', 'low', 'close'])
+
+            # If 4h requested, aggregate from 1h data
+            if timeframe == "4h" and interval == "1h":
+                df = self._aggregate_to_4h(df)
+
+            # Take only the last `limit` rows
+            df = df.tail(limit)
+
+            return df
+
+        except Exception as e:
+            logger.error(f"yfinance download error for {yf_symbol} {timeframe}: {e}")
+            return pd.DataFrame()
+
+    def _aggregate_to_4h(self, df: pd.DataFrame) -> pd.DataFrame:
+        """يجمّع بيانات 1h إلى 4h"""
+        try:
+            # Resample to 4-hour candles
+            agg = df.resample('4h').agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum'
+            })
+            agg = agg.dropna()
+            return agg
+        except Exception as e:
+            logger.error(f"4h aggregation error: {e}")
+            return df
 
     def fetch_ohlcv(self, symbol: str, timeframe: str = '4h', limit: int = 200) -> pd.DataFrame:
         """
         يجلب بيانات OHLCV ويرجعها DataFrame
+        symbol ممكن يكون XAU/USD أو GC=F
         """
+        # Map display symbol to yfinance symbol
+        yf_sym = self.symbol  # GC=F default
+        if symbol in ("XAU/USD", "XAUUSD", "GOLD"):
+            yf_sym = self.symbol
+        elif symbol.startswith("GC"):
+            yf_sym = symbol
+        elif symbol in ("XAUUSD=X",):
+            yf_sym = "XAUUSD=X"
+
         for attempt in range(3):
             try:
-                ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-                df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-                df.set_index('timestamp', inplace=True)
-                return df
+                df = self._yf_download(yf_sym, timeframe, limit)
+                if not df.empty and len(df) >= 20:
+                    return df
+                # Try alternative symbol
+                if yf_sym == "GC=F":
+                    logger.info("Trying XAUUSD=X as fallback...")
+                    df = self._yf_download("XAUUSD=X", timeframe, limit)
+                    if not df.empty:
+                        return df
+                elif yf_sym == "XAUUSD=X":
+                    logger.info("Trying GC=F as fallback...")
+                    df = self._yf_download("GC=F", timeframe, limit)
+                    if not df.empty:
+                        return df
             except Exception as e:
                 logger.warning(f"Attempt {attempt+1} for {symbol} {timeframe}: {e}")
                 if attempt < 2:
                     time.sleep(2 ** attempt)
+
         return pd.DataFrame()
 
     def fetch_multiple_pairs(self, symbols: List[str], timeframe: str = '4h',
                               limit: int = 200) -> Dict[str, pd.DataFrame]:
-        """يجلب بيانات أزواج متعددة"""
+        """يجلب بيانات (زوج واحد بس للذهب)"""
         results = {}
         for symbol in symbols:
             df = self.fetch_ohlcv(symbol, timeframe, limit)
             if not df.empty:
                 results[symbol] = df
-            time.sleep(0.3)  # Rate limit
+            time.sleep(0.3)
         return results
 
     def fetch_ticker(self, symbol: str) -> Dict:
-        """يجلب معلومات ticker"""
+        """يجلب معلومات ticker للذهب"""
         try:
-            ticker = self.exchange.fetch_ticker(symbol)
+            yf_sym = self.symbol
+            ticker = yf.Ticker(yf_sym)
+            info = ticker.history(period="2d", interval="1h")
+
+            if info.empty:
+                return {}
+
+            if isinstance(info.columns, pd.MultiIndex):
+                info.columns = info.columns.get_level_values(0)
+            info.columns = [c.lower() for c in info.columns]
+
+            last_price = float(info['close'].iloc[-1])
+            prev_price = float(info['close'].iloc[-2]) if len(info) > 1 else last_price
+            change_pct = ((last_price - prev_price) / prev_price) * 100 if prev_price else 0
+
             return {
-                'symbol': symbol,
-                'last': ticker.get('last', 0),
-                'high': ticker.get('high', 0),
-                'low': ticker.get('low', 0),
-                'volume': ticker.get('baseVolume', 0),
-                'change_pct': ticker.get('percentage', 0),
+                'symbol': self.display_name,
+                'last': last_price,
+                'high': float(info['high'].max()),
+                'low': float(info['low'].min()),
+                'volume': float(info['volume'].sum()),
+                'change_pct': change_pct,
             }
         except Exception as e:
-            logger.error(f"Error fetching ticker {symbol}: {e}")
+            logger.error(f"Error fetching ticker: {e}")
+            # Fallback: simple download
+            try:
+                df = self._yf_download(self.symbol, "1h", 2)
+                if not df.empty:
+                    last = float(df['close'].iloc[-1])
+                    return {
+                        'symbol': self.display_name,
+                        'last': last,
+                        'high': float(df['high'].max()),
+                        'low': float(df['low'].min()),
+                        'volume': float(df['volume'].sum()) if 'volume' in df else 0,
+                        'change_pct': 0,
+                    }
+            except:
+                pass
             return {}
 
     def get_top_gainers(self, limit: int = 10) -> List[Dict]:
-        """أكبر ارتفاعات"""
-        try:
-            tickers = self.exchange.fetch_tickers()
-            usdt_tickers = [
-                {'symbol': k, 'last': v.get('last', 0), 'change': v.get('percentage', 0)}
-                for k, v in tickers.items()
-                if '/USDT' in k and v.get('percentage') is not None and v.get('last', 0) > 0
-            ]
-            gainers = sorted(usdt_tickers, key=lambda x: x['change'], reverse=True)
-            return gainers[:limit]
-        except Exception as e:
-            logger.error(f"Error fetching gainers: {e}")
-            return []
+        """N/A للذهب — يرجع قائمة فارغة"""
+        return []
 
     def get_top_losers(self, limit: int = 10) -> List[Dict]:
-        """أكبر انخفاضات"""
-        try:
-            tickers = self.exchange.fetch_tickers()
-            usdt_tickers = [
-                {'symbol': k, 'last': v.get('last', 0), 'change': v.get('percentage', 0)}
-                for k, v in tickers.items()
-                if '/USDT' in k and v.get('percentage') is not None and v.get('last', 0) > 0
-            ]
-            losers = sorted(usdt_tickers, key=lambda x: x['change'])
-            return losers[:limit]
-        except Exception as e:
-            logger.error(f"Error fetching losers: {e}")
-            return []
+        """N/A للذهب — يرجع قائمة فارغة"""
+        return []
 
     def get_market_overview(self) -> Dict:
-        """نظرة عامة على السوق"""
+        """نظرة عامة على سوق الذهب"""
         overview = {}
         try:
-            btc = self.fetch_ticker('BTC/USDT')
-            overview['btc_price'] = btc.get('last', 0)
-            overview['btc_change'] = btc.get('change_pct', 0)
+            ticker = self.fetch_ticker("XAU/USD")
+            if ticker:
+                overview['gold_price'] = ticker.get('last', 0)
+                overview['gold_change'] = ticker.get('change_pct', 0)
+                overview['gold_high'] = ticker.get('high', 0)
+                overview['gold_low'] = ticker.get('low', 0)
+        except Exception as e:
+            logger.error(f"Error in market overview: {e}")
 
-            eth = self.fetch_ticker('ETH/USDT')
-            overview['eth_price'] = eth.get('last', 0)
-            overview['eth_change'] = eth.get('change_pct', 0)
+        # VIX (مؤشر الخوف)
+        try:
+            vix_df = self._yf_download(VIX_SYMBOL, "1d", 5)
+            if not vix_df.empty:
+                overview['vix'] = float(vix_df['close'].iloc[-1])
+                overview['vix_label'] = "خوف عالي" if overview['vix'] > 25 else "هدوء" if overview['vix'] < 15 else "متوسط"
         except:
             pass
+
+        # DXY (مؤشر الدولار — يؤثر على الذهب عكسياً)
+        try:
+            dxy_df = self._yf_download("DX-Y.NYB", "1d", 5)
+            if not dxy_df.empty:
+                overview['dxy'] = float(dxy_df['close'].iloc[-1])
+        except:
+            pass
+
         return overview
 
     def get_fear_greed_index(self) -> Optional[int]:
-        """مؤشر الخوف والطمع"""
+        """مؤشر الخوف والطمع (من السوق العام)"""
         try:
             resp = requests.get(FEAR_GREED_API, timeout=10)
             data = resp.json()
@@ -142,7 +257,6 @@ class MarketDataFetcher:
         recent = df.tail(lookback)
         highs = recent['high'].values
         lows = recent['low'].values
-        closes = recent['close'].values
 
         # Find pivot highs
         resistance = []
@@ -163,14 +277,14 @@ class MarketDataFetcher:
         return support, resistance
 
     def get_pivot_points(self, df: pd.DataFrame) -> Dict[str, float]:
-        """يحسب النقاط المحورية"""
+        """يحسب النقاط المحورية (Standard, Fibonacci, Camarilla)"""
         if len(df) < 2:
             return {}
 
         prev = df.iloc[-2]
-        high = prev['high']
-        low = prev['low']
-        close = prev['close']
+        high = float(prev['high'])
+        low = float(prev['low'])
+        close = float(prev['close'])
 
         pivot = (high + low + close) / 3
 
@@ -195,11 +309,11 @@ class MarketDataFetcher:
         cam_s2 = close - 1.1 * (high - low) / 2
 
         return {
-            'pivot': round(pivot, 6),
-            'r1': round(r1, 6), 'r2': round(r2, 6), 'r3': round(r3, 6),
-            's1': round(s1, 6), 's2': round(s2, 6), 's3': round(s3, 6),
-            'fib_r1': round(fib_r1, 6), 'fib_r2': round(fib_r2, 6),
-            'fib_s1': round(fib_s1, 6), 'fib_s2': round(fib_s2, 6),
-            'cam_r1': round(cam_r1, 6), 'cam_r2': round(cam_r2, 6),
-            'cam_s1': round(cam_s1, 6), 'cam_s2': round(cam_s2, 6),
+            'pivot': round(pivot, 2),
+            'r1': round(r1, 2), 'r2': round(r2, 2), 'r3': round(r3, 2),
+            's1': round(s1, 2), 's2': round(s2, 2), 's3': round(s3, 2),
+            'fib_r1': round(fib_r1, 2), 'fib_r2': round(fib_r2, 2),
+            'fib_s1': round(fib_s1, 2), 'fib_s2': round(fib_s2, 2),
+            'cam_r1': round(cam_r1, 2), 'cam_r2': round(cam_r2, 2),
+            'cam_s1': round(cam_s1, 2), 'cam_s2': round(cam_s2, 2),
         }

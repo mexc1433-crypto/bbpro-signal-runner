@@ -1,6 +1,6 @@
 """
 BBPro Signal Bot - Technical Indicators
-مؤشرات فنية شاملة - 17+ مؤشر
+مؤشرات فنية شاملة - 22+ مؤشر
 """
 import pandas as pd
 import numpy as np
@@ -363,6 +363,80 @@ def supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) -> T
 
 
 # ═══════════════════════════════════════════════════════════════
+# 18. CMF - Chaikin Money Flow
+# ═══════════════════════════════════════════════════════════════
+
+def cmf(df: pd.DataFrame, period: int = 20) -> pd.Series:
+    """CMF - Chaikin Money Flow (مؤشر تدفق أموال تشايكين)"""
+    high_low = (df['high'] - df['low']).replace(0, np.nan)
+    mf_multiplier = ((df['close'] - df['low']) - (df['high'] - df['close'])) / high_low
+    mf_volume = mf_multiplier * df['volume']
+    vol_sum = df['volume'].rolling(window=period).sum().replace(0, np.nan)
+    return mf_volume.rolling(window=period).sum() / vol_sum
+
+
+# ═══════════════════════════════════════════════════════════════
+# 19. DMI - Directional Movement Index
+# ═══════════════════════════════════════════════════════════════
+
+def dmi(df: pd.DataFrame, period: int = 14) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """DMI - Directional Movement Index (+DI, -DI, ADX)"""
+    up_move = df['high'].diff()
+    down_move = -df['low'].diff()
+
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=df.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=df.index)
+
+    tr_val = atr(df, period)
+    plus_di = 100 * (plus_dm.rolling(window=period).mean() / tr_val.replace(0, np.nan))
+    minus_di = 100 * (minus_dm.rolling(window=period).mean() / tr_val.replace(0, np.nan))
+
+    di_sum = plus_di + minus_di
+    dx = 100 * (plus_di - minus_di).abs() / di_sum.replace(0, np.nan)
+    adx_val = dx.rolling(window=period).mean()
+
+    return plus_di, minus_di, adx_val
+
+
+# ═══════════════════════════════════════════════════════════════
+# 20. Elder Ray (Bull / Bear Power)
+# ═══════════════════════════════════════════════════════════════
+
+def elder_ray(df: pd.DataFrame, period: int = 13) -> Tuple[pd.Series, pd.Series]:
+    """Elder Ray Index - Bull Power & Bear Power (قوة الثيران والدببة)"""
+    ema_val = df['close'].ewm(span=period, adjust=False).mean()
+    bull_power = df['high'] - ema_val
+    bear_power = df['low'] - ema_val
+    return bull_power, bear_power
+
+
+# ═══════════════════════════════════════════════════════════════
+# 21. Keltner Channels
+# ═══════════════════════════════════════════════════════════════
+
+def keltner_channels(df: pd.DataFrame, period: int = 20, atr_period: int = 10, multiplier: float = 2.0) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """Keltner Channels - قنوات كيلتنر"""
+    middle = df['close'].ewm(span=period, adjust=False).mean()
+    atr_val = atr(df, atr_period)
+    upper = middle + (multiplier * atr_val)
+    lower = middle - (multiplier * atr_val)
+    return upper, middle, lower
+
+
+# ═══════════════════════════════════════════════════════════════
+# 22. TRIX - Triple Exponential Average
+# ═══════════════════════════════════════════════════════════════
+
+def trix(df: pd.DataFrame, period: int = 12) -> pd.Series:
+    """TRIX - Triple Exponential Average (المتوسط الأسي الثلاثي)"""
+    ema1 = df['close'].ewm(span=period, adjust=False).mean()
+    ema2 = ema1.ewm(span=period, adjust=False).mean()
+    ema3 = ema2.ewm(span=period, adjust=False).mean()
+    prev_ema3 = ema3.shift(1).replace(0, np.nan)
+    return ((ema3 - ema3.shift(1)) / prev_ema3) * 100
+
+
+# ═══════════════════════════════════════════════════════════════
 # Calculate All Indicators
 # ═══════════════════════════════════════════════════════════════
 
@@ -377,7 +451,7 @@ def calculate_all_indicators(df: pd.DataFrame) -> Dict:
 
     # RSI (multiple periods)
     result['rsi_7'] = rsi(df, 7)
-    result['rsi_14'] = rsi(df, 14);
+    result['rsi_14'] = rsi(df, 14)
     result['rsi_21'] = rsi(df, 21)
 
     # MACD
@@ -429,5 +503,20 @@ def calculate_all_indicators(df: pd.DataFrame) -> Dict:
 
     # SuperTrend
     result['supertrend'], result['supertrend_dir'] = supertrend(df)
+
+    # CMF
+    result['cmf'] = cmf(df, 20)
+
+    # DMI
+    result['dmi_plus'], result['dmi_minus'], result['dmi_adx'] = dmi(df)
+
+    # Elder Ray
+    result['bull_power'], result['bear_power'] = elder_ray(df)
+
+    # Keltner Channels
+    result['kc_upper'], result['kc_middle'], result['kc_lower'] = keltner_channels(df)
+
+    # TRIX
+    result['trix'] = trix(df, 12)
 
     return result

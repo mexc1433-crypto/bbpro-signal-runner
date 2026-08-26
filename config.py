@@ -1,6 +1,6 @@
 """
 BBPro Signal Bot - Configuration
-إعدادات البوت الرئيسية
+إعدادات البوت الرئيسية - مخصص لـ XAU/USD (الذهب)
 """
 import os
 from dotenv import load_dotenv
@@ -17,22 +17,19 @@ PRIVATE_CHANNEL_ID = os.getenv("PRIVATE_CHANNEL_ID", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 # ═══════════════════════════════════════════════════════════════
-# Exchange Configuration
+# Data Source Configuration
 # ═══════════════════════════════════════════════════════════════
-EXCHANGE_NAME = os.getenv("EXCHANGE", "mexc")
-EXCHANGE_API_KEY = os.getenv("EXCHANGE_API_KEY", "")
-EXCHANGE_API_SECRET = os.getenv("EXCHANGE_API_SECRET", "")
+# نستخدم Yahoo Finance لجلب بيانات الذهب (XAU/USD)
+# GC=F = Gold Futures, XAUUSD=X = Forex Gold Spot
+DATA_SOURCE = os.getenv("DATA_SOURCE", "yfinance")
+GOLD_SYMBOL = os.getenv("GOLD_SYMBOL", "GC=F")  # أو XAUUSD=X
+GOLD_DISPLAY_NAME = "XAU/USD"
 
 # ═══════════════════════════════════════════════════════════════
-# Trading Pairs - أزواج التداول
+# Trading Pairs - زوج واحد فقط (الذهب)
 # ═══════════════════════════════════════════════════════════════
 TRADING_PAIRS: List[str] = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
-    "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "LINK/USDT", "MATIC/USDT",
-    "DOT/USDT", "TRX/USDT", "LTC/USDT", "ATOM/USDT", "NEAR/USDT",
-    "APT/USDT", "ARB/USDT", "OP/USDT", "INJ/USDT", "SUI/USDT",
-    "TIA/USDT", "SEI/USDT", "ORDI/USDT", "PEPE/USDT", "SHIB/USDT",
-    "FIL/USDT", "RNDR/USDT", "FTM/USDT", "ALGO/USDT", "ICP/USDT",
+    "XAU/USD",
 ]
 
 # ═══════════════════════════════════════════════════════════════
@@ -97,21 +94,21 @@ CHANNEL_RULES: Dict[str, Dict[str, Any]] = {
 # ═══════════════════════════════════════════════════════════════
 RISK_LEVELS: Dict[str, Dict[str, Any]] = {
     "LOW": {
-        "risk_pct": (1.0, 2.0),
+        "risk_pct": (0.5, 1.0),     # الذهب أقل تذبذب من الكريبتو
         "min_rr": 2.0,
         "min_confidence": 70,
         "label_ar": "منخفضة",
         "emoji": "🟢",
     },
     "MEDIUM": {
-        "risk_pct": (2.0, 4.0),
+        "risk_pct": (1.0, 2.0),
         "min_rr": 1.5,
         "min_confidence": 55,
         "label_ar": "متوسطة",
         "emoji": "🟡",
     },
     "HIGH": {
-        "risk_pct": (4.0, 6.0),
+        "risk_pct": (2.0, 3.0),
         "min_rr": 1.0,
         "min_confidence": 40,
         "label_ar": "عالية",
@@ -120,20 +117,20 @@ RISK_LEVELS: Dict[str, Dict[str, Any]] = {
 }
 
 # ═══════════════════════════════════════════════════════════════
-# Trade Type Targets - أهداف كل نوع صفقة
+# Trade Type Targets - أهداف كل نوع صفقة (مخصصة للذهب)
 # ═══════════════════════════════════════════════════════════════
 TRADE_TARGETS: Dict[str, Dict[str, float]] = {
     "SCALPING": {
-        "tp1_pct": 0.5, "tp2_pct": 0.8, "tp3_pct": 1.2,
-        "sl_pct": 0.5,  "holding_time": "15-60 دقيقة",
+        "tp1_pct": 0.3, "tp2_pct": 0.5, "tp3_pct": 0.8,    # الذهب يتحرك أقل من الكريبتو
+        "sl_pct": 0.3,  "holding_time": "15-60 دقيقة",
     },
     "MEDIUM": {
-        "tp1_pct": 1.5, "tp2_pct": 2.5, "tp3_pct": 4.0,
-        "sl_pct": 1.2,  "holding_time": "4-24 ساعة",
+        "tp1_pct": 0.8, "tp2_pct": 1.5, "tp3_pct": 2.5,
+        "sl_pct": 0.8,  "holding_time": "4-24 ساعة",
     },
     "SWING": {
-        "tp1_pct": 3.0, "tp2_pct": 5.0, "tp3_pct": 8.0,
-        "sl_pct": 2.5,  "holding_time": "1-7 أيام",
+        "tp1_pct": 2.0, "tp2_pct": 4.0, "tp3_pct": 7.0,
+        "sl_pct": 1.5,  "holding_time": "1-7 أيام",
     },
 }
 
@@ -155,6 +152,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 TIMEZONE = os.getenv("TIMEZONE", "Africa/Cairo")
 
 # ═══════════════════════════════════════════════════════════════
-# Fear & Greed API
+# Fear & Greed API (للذهب نستخدم مؤشر VIX كدليل على الخوف)
 # ═══════════════════════════════════════════════════════════════
 FEAR_GREED_API = "https://api.alternative.me/fng/?limit=1"
+VIX_SYMBOL = "^VIX"  # مؤشر التذبذب - يعكس الخوف في السوق

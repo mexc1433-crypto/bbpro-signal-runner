@@ -22,7 +22,9 @@ from indicators import calculate_all_indicators
 from strategies import (
     ALL_STRATEGIES, trend_following_strategy, mean_reversion_strategy,
     momentum_strategy, breakout_strategy, scalping_strategy,
-    swing_strategy, supertrend_strategy, multi_confluence_strategy
+    swing_strategy, supertrend_strategy, multi_confluence_strategy,
+    vwap_strategy, ichimoku_cloud_strategy, cci_williams_strategy,
+    parabolic_sar_strategy, volume_breakout_strategy
 )
 from risk_manager import RiskManager
 from channel_manager import ChannelManager
@@ -51,7 +53,7 @@ class BBProSignalBot:
 
     def __init__(self):
         self.bot = Bot(token=BOT_TOKEN)
-        self.fetcher = MarketDataFetcher(EXCHANGE_NAME)
+        self.fetcher = MarketDataFetcher()
         self.risk_manager = RiskManager()
         self.channel_manager = ChannelManager()
         self.analyzer = MarketAnalyzer(self.fetcher)
@@ -270,7 +272,7 @@ class BBProSignalBot:
         await update.message.reply_text(
             "🤖 **BBPro Signal Bot**\n\n"
             "بوت إشارات تداول العملات الرقمية\n"
-            "📊 8 استراتيجيات | 17+ مؤشر\n"
+            "📊 13 استراتيجيات | 22+ مؤشر | XAU/USD فقط\n"
             "⚡ 3 أنواع صفقات: سريع / متوسط / بعيد\n\n"
             "الأوامر المتاحة:\n"
             "/help - المساعدة\n"
@@ -309,7 +311,7 @@ class BBProSignalBot:
         """أمر /status"""
         status = (
             "📊 **حالة BBPro Signal Bot**\n\n"
-            f"البورصة: {EXCHANGE_NAME.upper()}\n"
+            "الرمز: XAU/USD (الذهب)\n"
             f"الأزواج: {len(TRADING_PAIRS)}\n"
             f"الاستراتيجيات: 8\n"
             f"المؤشرات: 17+\n"
@@ -404,10 +406,10 @@ class BBProSignalBot:
 
         logger.info("=" * 60)
         logger.info("🚀 BBPro Signal Bot Starting...")
-        logger.info(f"📊 Exchange: {EXCHANGE_NAME.upper()}")
-        logger.info(f"💱 Pairs: {len(TRADING_PAIRS)}")
-        logger.info(f"📈 Strategies: 8")
-        logger.info(f"📏 Indicators: 17+")
+        logger.info("📊 Symbol: XAU/USD (Gold)")
+        logger.info(f"💱 Pair: XAU/USD (Gold)")
+        logger.info(f"📈 Strategies: 13")
+        logger.info(f"📏 Indicators: 22+")
         logger.info(f"📡 Public Channel: {'✅' if PUBLIC_CHANNEL_ID else '❌'}")
         logger.info(f"📡 Private Channel: {'✅' if PRIVATE_CHANNEL_ID else '❌'}")
         logger.info("=" * 60)
@@ -450,7 +452,7 @@ class BBProSignalBot:
                 chat_id=PRIVATE_CHANNEL_ID or PUBLIC_CHANNEL_ID,
                 text="🤖 BBPro Signal Bot بدأ العمل!\n\n"
                      "✅ جميع الأنظمة جاهزة\n"
-                     "📊 8 استراتيجيات | 17+ مؤشر\n"
+                     "📊 13 استراتيجيات | 22+ مؤشر | XAU/USD فقط\n"
                      "⏱️ المسح التلقائي مفعّل\n"
                      "🔄 أول مسح بعد 30 ثانية"
             )
