@@ -33,6 +33,9 @@ from formatter import (
     format_summary_message, format_market_update
 )
 from analysis import MarketAnalyzer
+from signal_tracker import SignalTracker
+from economic_calendar import EconomicCalendar
+from confluence import ConfluenceAnalyzer
 
 # ═══════════════════════════════════════════════════════════════
 # Logging Setup
@@ -57,6 +60,9 @@ class BBProSignalBot:
         self.risk_manager = RiskManager()
         self.channel_manager = ChannelManager()
         self.analyzer = MarketAnalyzer(self.fetcher)
+        self.tracker = SignalTracker()
+        self.calendar = EconomicCalendar()
+        self.confluence = ConfluenceAnalyzer(self.fetcher)
 
         self.strategies = ALL_STRATEGIES
         self.signal_history: List[Dict] = []
@@ -157,6 +163,15 @@ class BBProSignalBot:
     # ═══════════════════════════════════════════════════════════
 
     async def process_signals(self, signals: List[Dict]):
+        # تحسين الإشارات بالتطابق متعدد الأطر
+        try:
+            confluence_data = self.confluence.analyze_confluence()
+            if confluence_data and confluence_data.get("confidence_boost", 0) > 0:
+                for signal in signals:
+                    self.confluence.enhance_signal_with_confluence(signal, confluence_data)
+                logger.info(f"Confluence: {confluence_data['confluence_level']} (+{confluence_data['confidence_boost']}%)")
+        except Exception as e:
+            logger.warning(f"Confluence analysis failed: {e}")
         """يوزع الإشارات على القنوات المناسبة"""
         for signal in signals:
             # Calculate capital plans
@@ -299,7 +314,10 @@ class BBProSignalBot:
             "/status - حالة البوت\n"
             "/scan - مسح فوري للسوق\n"
             "/analysis - تحليل السوق\n"
-            "/summary - ملخص الإشارات"
+            "/summary - ملخص الإشارات\n"
+            "/performance - تقرير الأداء\n"
+            "/calendar - الأحداث الاقتصادية\n"
+            "/confluence - تحليل التطابق"
         )
 
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -376,6 +394,30 @@ class BBProSignalBot:
         message = format_summary_message(self.signal_history)
         await update.message.reply_text(message, parse_mode='HTML')
 
+    async def cmd_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /performance - تقرير الأداء"""
+        if not await self._check_admin(update):
+            return
+        report = self.tracker.get_performance_report(days=7)
+        await update.message.reply_text(report)
+
+    async def cmd_calendar(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /calendar - الأحداث الاقتصادية"""
+        if not await self._check_admin(update):
+            return
+        events = self.calendar.get_upcoming_events(hours_ahead=48)
+        msg = self.calendar.format_events_message(events)
+        await update.message.reply_text(msg)
+
+    async def cmd_confluence(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /confluence - تحليل التطابق"""
+        if not await self._check_admin(update):
+            return
+        await update.message.reply_text("📊 جاري تحليل التطابق...")
+        data = self.confluence.analyze_confluence()
+        msg = self.confluence.format_confluence_report(data)
+        await update.message.reply_text(msg)
+
     # ═══════════════════════════════════════════════════════════
     # Scheduler — FIXED: uses asyncio.create_task instead of new event loop
     # ═══════════════════════════════════════════════════════════
@@ -419,9 +461,25 @@ class BBProSignalBot:
         logger.info("⏰ Daily summary schedule triggered")
         self._schedule_async(self.send_daily_summary)
 
+    def scheduled_news_check(self):
+        logger.info("⏰ News check triggered")
+        self._schedule_async(self.check_news_alerts)
+
     # ═══════════════════════════════════════════════════════════
     # Main Run
     # ═══════════════════════════════════════════════════════════
+
+    async def check_news_alerts(self):
+        """يفحص ويطلق تنبيهات الأخبار"""
+        try:
+            event = self.calendar.check_and_alert()
+            if event:
+                msg = self.calendar.format_pre_alert(event)
+                if self.private_channel:
+                    await self.bot.send_message(chat_id=self.private_channel, text=msg)
+                    logger.info(f"News alert sent: {event['title']}")
+        except Exception as e:
+            logger.error(f"News alert error: {e}")
 
     def run(self):
         """نقطة التشغيل الرئيسية"""
@@ -448,6 +506,7 @@ class BBProSignalBot:
         schedule.every(15).minutes.do(self.scheduled_scalping)
         schedule.every(60).minutes.do(self.scheduled_medium)
         schedule.every(4).hours.do(self.scheduled_swing)
+        schedule.every(10).minutes.do(self.scheduled_news_check)
         schedule.every(6).hours.do(self.scheduled_analysis)
         schedule.every().day.at("23:00").do(self.scheduled_summary)
 
@@ -461,6 +520,9 @@ class BBProSignalBot:
         app.add_handler(CommandHandler("scan", self.cmd_scan))
         app.add_handler(CommandHandler("analysis", self.cmd_analysis))
         app.add_handler(CommandHandler("summary", self.cmd_summary))
+        app.add_handler(CommandHandler("performance", self.cmd_performance))
+        app.add_handler(CommandHandler("calendar", self.cmd_calendar))
+        app.add_handler(CommandHandler("confluence", self.cmd_confluence))
 
         # Run scheduler in background — داخل الـ event loop النشط
         async def run_scheduler(app):
