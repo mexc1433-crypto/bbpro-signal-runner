@@ -63,8 +63,26 @@ class BBProSignalBot:
         self.public_channel = PUBLIC_CHANNEL_ID
         self.private_channel = PRIVATE_CHANNEL_ID
         self._app = None  # Reference to the telegram Application
+        self.admin_id = ADMIN_ID  # only owner can use commands
 
         logger.info("BBPro Signal Bot initialized")
+
+    def _is_admin(self, user_id: int) -> bool:
+        """يتحقق إن المستخدم هو الأدمن فقط"""
+        if self.admin_id and user_id == self.admin_id:
+            return True
+        return False
+
+    async def _check_admin(self, update: Update) -> bool:
+        """فحص الأدمن قبل أي أمر - يرفع غير المصرح"""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id):
+            logger.warning(f"⚠️ Unauthorized access by {user_id} ({update.effective_user.full_name})")
+            await update.message.reply_text(
+                "🚫 عذراً، هذا البوت خاص ولا يمكن استخدامه إلا من قبل المالك."
+            )
+            return False
+        return True
 
     # ═══════════════════════════════════════════════════════════
     # Market Scanning
@@ -269,6 +287,8 @@ class BBProSignalBot:
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /start"""
+        if not await self._check_admin(update):
+            return
         await update.message.reply_text(
             "🤖 **BBPro Signal Bot**\n\n"
             "بوت إشارات تداول العملات الرقمية\n"
@@ -284,6 +304,8 @@ class BBProSignalBot:
 
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /help"""
+        if not await self._check_admin(update):
+            return
         await update.message.reply_text(
             "📋 **مساعدة BBPro Signal Bot**\n\n"
             "الأوامر:\n"
@@ -309,6 +331,8 @@ class BBProSignalBot:
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /status"""
+        if not await self._check_admin(update):
+            return
         status = (
             "📊 **حالة BBPro Signal Bot**\n\n"
             "الرمز: XAU/USD (الذهب)\n"
@@ -324,7 +348,9 @@ class BBProSignalBot:
 
     async def cmd_scan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /scan - مسح فوري"""
-        await update.message.reply_text("🔄 جاري مسح السوق...这可能需要几分钟")
+        if not await self._check_admin(update):
+            return
+        await update.message.reply_text("🔄 جاري مسح السوق... قد يستغرق دقيقة")
         logger.info(f"Manual scan requested by {update.effective_user.id}")
         signals = self.scan_market("ALL")
         if signals:
@@ -335,11 +361,15 @@ class BBProSignalBot:
 
     async def cmd_analysis(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /analysis"""
+        if not await self._check_admin(update):
+            return
         await update.message.reply_text("📊 جاري تحليل السوق...")
         await self.send_market_analysis()
 
     async def cmd_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /summary"""
+        if not await self._check_admin(update):
+            return
         if not self.signal_history:
             await update.message.reply_text("⚠️ لا توجد إشارات اليوم بعد")
             return

@@ -1,6 +1,6 @@
 """
 BBPro Signal Bot - Message Formatter
-تنسيق الرسائل للقنوات
+تنسيق الرسائل للقنوات - مبسط وواضح
 """
 from typing import Dict, List, Optional
 from datetime import datetime
@@ -36,7 +36,7 @@ def _trade_type_ar(trade_type: str) -> str:
 
 
 def _fmt_price(price: float) -> str:
-    """تنسيق السعر حسب حجمه"""
+    """تنسيق السعر للذهب"""
     if price >= 1000:
         return f"{price:,.2f}"
     elif price >= 1:
@@ -55,9 +55,9 @@ def _fmt_pct(entry: float, target: float) -> str:
 def format_signal_message(signal: Dict, capital_plans: List[Dict],
                            channel_type: str = "PRIVATE") -> str:
     """
-    تنسيق رسالة الإشارة الكاملة
-    PUBLIC: رسالة مبسطة - ربح صغير
-    PRIVATE: رسالة مفصلة - ربح كبير + كل مستويات رأس المال
+    تنسيق رسالة الإشارة
+    PUBLIC: رسالة مبسطة جداً - ربح صغير
+    PRIVATE: رسالة واضحة وبسيطة - سعر الدخول والخروج والستوب
     """
     emoji = _emoji_signal(signal["signal_type"])
     trade_emoji = _emoji_trade_type(signal["trade_type"])
@@ -66,178 +66,131 @@ def format_signal_message(signal: Dict, capital_plans: List[Dict],
 
     entry = signal["entry_price"]
     is_buy = signal["signal_type"] == "BUY"
+    direction = "شراء" if is_buy else "بيع"
 
     # ═══════════════════════════════════════
-    # PUBLIC CHANNEL - simplified format
+    # PUBLIC CHANNEL - بسيط جداً
     # ═══════════════════════════════════════
     if channel_type == "PUBLIC":
-        # Show only small capital tiers for public
-        small_plans = [p for p in capital_plans if p["capital"] <= 100][:4]
-
-        msg = f"{emoji} إشارة {'شراء' if is_buy else 'بيع'} | {signal.get('symbol', '???')}\n"
-        msg += "━━━━━━━━━━━━━━━━━━━━\n"
+        msg = f"{emoji} {direction} | XAU/USD\n"
+        msg += "━━━━━━━━━━━━━━━━\n"
         msg += f"{trade_emoji} النوع: {trade_ar}\n"
         msg += f"📊 الاستراتيجية: {signal['strategy_name']}\n"
         msg += f"🎯 نسبة النجاح: {signal['confidence']}%\n\n"
 
         msg += f"💵 سعر الدخول: {_fmt_price(entry)}\n"
-        if is_buy:
-            msg += f"🎯 هدف 1: {_fmt_price(signal['take_profit_1'])}\n"
-            msg += f"🎯 هدف 2: {_fmt_price(signal['take_profit_2'])}\n"
-            msg += f"🎯 هدف 3: {_fmt_price(signal['take_profit_3'])}\n"
-            msg += f"🛑 الخسارة: {_fmt_price(signal['stop_loss'])}\n"
-        else:
-            msg += f"🎯 هدف 1: {_fmt_price(signal['take_profit_1'])}\n"
-            msg += f"🎯 هدف 2: {_fmt_price(signal['take_profit_2'])}\n"
-            msg += f"🎯 هدف 3: {_fmt_price(signal['take_profit_3'])}\n"
-            msg += f"🛑 الخسارة: {_fmt_price(signal['stop_loss'])}\n"
+        msg += f"🎯 هدف 1: {_fmt_price(signal['take_profit_1'])}\n"
+        msg += f"🎯 هدف 2: {_fmt_price(signal['take_profit_2'])}\n"
+        msg += f"🛑 ستوب لوس: {_fmt_price(signal['stop_loss'])}\n\n"
 
-        msg += "\n💰 خطة رأس المال:\n"
-        msg += "━━━━━━━━━━━━━━━━━━━━\n"
-        for p in small_plans:
-            profit = p["potential_profit_tp1"]
-            loss = p["potential_loss"]
-            msg += f"💵 ${p['capital']} → حجم ${p['position_size_usd']} | {p['leverage']} | ربح +${profit} | خسارة -${loss}\n"
-
-        msg += f"\n⚠️ المخاطرة: {signal['risk_level']} {_emoji_risk(signal['risk_level'])}\n"
-        msg += f"📌 المؤشرات: {', '.join(signal['indicators_used'][:4])}\n"
-        msg += f"💡 {signal['reasoning'][:200]}\n" if len(signal.get('reasoning', '')) > 0 else ""
-        msg += f"\n📅 {signal.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M'))}\n"
-        msg += "━━━━━━━━━━━━━━━━━━━━\n"
-        msg += "⚠️ ليست نصيحة استثمارية - إدارة مخاطرك\n"
-        msg += "🤖 BBPro Signal Bot"
+        msg += f"⚠️ المخاطرة: {signal['risk_level']} {risk_emoji}\n"
+        msg += f"⏱️ المدة: {signal.get('holding_time', '')}\n"
+        msg += f"📅 {signal.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M'))}\n"
+        msg += "━━━━━━━━━━━━━━━━\n"
+        msg += "⚠️ ليست نصيحة استثمارية\n"
+        msg += "🤖 BBPro Signal"
 
         return msg
 
     # ═══════════════════════════════════════
-    # PRIVATE CHANNEL - full detailed format
+    # PRIVATE CHANNEL - واضح ومباشر
     # ═══════════════════════════════════════
     else:
-        diamond = "💎" if signal["confidence"] >= 80 else ""
-        msg = f"{emoji}{diamond} إشارة {'شراء' if is_buy else 'بيع'} {'مميزة' if diamond else ''} | {signal.get('symbol', '???')}\n"
+        # Risk/Reward
+        rr = abs(signal["take_profit_2"] - entry) / max(abs(entry - signal["stop_loss"]), 0.000001)
+
+        msg = f"{emoji} {direction} | XAU/USD\n"
         msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         msg += f"{trade_emoji} النوع: {trade_ar}\n"
         msg += f"📊 الاستراتيجية: {signal['strategy_name']}\n"
         msg += f"🎯 نسبة النجاح: {signal['confidence']}%\n"
+        msg += f"🔥 R:R = 1:{rr:.1f}\n\n"
 
-        # Risk/Reward
-        rr = abs(signal["take_profit_2"] - entry) / max(abs(entry - signal["stop_loss"]), 0.000001)
-        msg += f"🔥 المخاطرة/الربح: 1:{rr:.1f}\n\n"
-
+        # الأساسيات - سعر الدخول والأهداف والستوب
+        msg += "📍 تفاصيل الصفقة:\n"
         msg += f"💵 سعر الدخول: {_fmt_price(entry)}\n"
-        if is_buy:
-            tp1_pct = _fmt_pct(entry, signal["take_profit_1"])
-            tp2_pct = _fmt_pct(entry, signal["take_profit_2"])
-            tp3_pct = _fmt_pct(entry, signal["take_profit_3"])
-            sl_pct = _fmt_pct(entry, signal["stop_loss"])
-            msg += f"🎯 TP1: {_fmt_price(signal['take_profit_1'])} ({tp1_pct})\n"
-            msg += f"🎯 TP2: {_fmt_price(signal['take_profit_2'])} ({tp2_pct})\n"
-            msg += f"🎯 TP3: {_fmt_price(signal['take_profit_3'])} ({tp3_pct})\n"
-            msg += f"🛑 SL: {_fmt_price(signal['stop_loss'])} ({sl_pct})\n"
-        else:
-            tp1_pct = _fmt_pct(entry, signal["take_profit_1"])
-            tp2_pct = _fmt_pct(entry, signal["take_profit_2"])
-            tp3_pct = _fmt_pct(entry, signal["take_profit_3"])
-            sl_pct = _fmt_pct(entry, signal["stop_loss"])
-            msg += f"🎯 TP1: {_fmt_price(signal['take_profit_1'])} ({tp1_pct})\n"
-            msg += f"🎯 TP2: {_fmt_price(signal['take_profit_2'])} ({tp2_pct})\n"
-            msg += f"🎯 TP3: {_fmt_price(signal['take_profit_3'])} ({tp3_pct})\n"
-            msg += f"🛑 SL: {_fmt_price(signal['stop_loss'])} ({sl_pct})\n"
+        msg += f"🎯 TP1: {_fmt_price(signal['take_profit_1'])} ({_fmt_pct(entry, signal['take_profit_1'])})\n"
+        msg += f"🎯 TP2: {_fmt_price(signal['take_profit_2'])} ({_fmt_pct(entry, signal['take_profit_2'])})\n"
+        msg += f"🎯 TP3: {_fmt_price(signal['take_profit_3'])} ({_fmt_pct(entry, signal['take_profit_3'])})\n"
+        msg += f"🛑 SL: {_fmt_price(signal['stop_loss'])} ({_fmt_pct(entry, signal['stop_loss'])})\n\n"
 
-        # Full capital tier table
-        msg += "\n📊 خطة رأس المال الكاملة:\n"
+        # خطة رأس المال - جدول بسيط
+        msg += "💰 خطة رأس المال:\n"
         msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         for p in capital_plans:
             profit = p["potential_profit_tp1"]
-            profit2 = p["potential_profit_tp2"]
             profit3 = p["potential_profit_tp3"]
             loss = p["potential_loss"]
-            ev = p.get("expected_value", 0)
-            ev_emoji = "📈" if ev > 0 else "📉"
+            msg += f"${p['capital']} → ربح +${profit} | خسارة -${loss}\n"
 
-            msg += f"💵 ${p['capital']} → حجم ${p['position_size_usd']} | {p['leverage']} | TP1: +${profit} | TP2: +${profit2} | TP3: +${profit3} | SL: -${loss} | EV: {ev_emoji}${ev}\n"
+        msg += f"\n🛡️ المخاطرة: {signal['risk_level']} {risk_emoji}\n"
+        msg += f"⏱️ المدة: {signal.get('holding_time', '')}\n"
 
-        # Advanced analysis
-        msg += "\n📈 التحليل الفني المتقدم:\n"
-        msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        for indicator in signal.get("indicators_used", []):
-            msg += f"• {indicator} ✅\n"
-
-        # Risk management
-        msg += "\n🛡️ إدارة المخاطر:\n"
-        msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        msg += f"• مستوى المخاطرة: {signal['risk_level']} {_emoji_risk(signal['risk_level'])}\n"
-        msg += f"• نسبة النجاح: {signal['confidence']}%\n"
-        msg += f"• نسبة R:R: 1:{rr:.1f}\n"
-
-        # Reasoning
-        reasoning = signal.get("reasoning", "")
-        if reasoning:
-            msg += f"\n💡 سبب الإشارة:\n{reasoning}\n"
+        # المؤشرات المستخدمة
+        indicators = signal.get("indicators_used", [])
+        if indicators:
+            msg += f"\n📈 المؤشرات ({len(indicators)}):\n"
+            for ind in indicators[:6]:
+                msg += f"  ✅ {ind}\n"
 
         msg += f"\n📅 {signal.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M'))}\n"
         msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        msg += "⚠️ ليست نصيحة استثمارية - إدارة مخاطرك\n"
-        msg += "🤖 BBPro Signal Bot 🔥"
+        msg += "⚠️ ليست نصيحة استثمارية\n"
+        msg += "🤖 BBPro Signal 🔥"
 
         return msg
 
 
 def format_analysis_message(analysis: Dict) -> str:
-    """تنسيق رسالة تحليل السوق"""
+    """تنسيق رسالة تحليل السوق للذهب"""
     sentiment = analysis.get("sentiment", "NEUTRAL")
     sentiment_emoji = {"BULLISH": "🟢 صاعد", "BEARISH": "🔴 هابط", "NEUTRAL": "⚪ محايد"}.get(sentiment, "⚪ محايد")
 
-    msg = "📊 تحليل السوق الشامل\n"
+    msg = "📊 تحليل سوق الذهب\n"
     msg += "━━━━━━━━━━━━━━━━━━━━\n"
     msg += f"🌍 الاتجاه العام: {sentiment_emoji}\n"
-    msg += f"💪 قوة الاتجاه: {analysis.get('trend_strength', 0):.0f}%\n\n"
+    msg += f"💪 قوة الاتجاه: {analysis.get('sentiment_score', 0):.0f}/100\n\n"
 
-    if analysis.get("btc_price"):
-        msg += f"₿ BTC: ${analysis['btc_price']:,.0f}\n"
+    if analysis.get("gold_price"):
+        msg += f"🥇 الذهب: ${analysis['gold_price']:,.2f}\n"
+        ch = analysis.get("gold_change", 0)
+        msg += f"📊 التغير: {ch:+.2f}%\n"
+
+    if analysis.get("vix"):
+        msg += f"😱 VIX: {analysis['vix']:.1f} ({analysis.get('vix_label', '')})\n"
+
+    if analysis.get("dxy"):
+        msg += f"💵 مؤشر الدولار: {analysis['dxy']:.2f}\n"
+
+    if analysis.get("silver_price"):
+        msg += f"🥈 الفضة: ${analysis['silver_price']:,.2f}\n"
+
     if analysis.get("fear_greed") is not None:
         fg = analysis["fear_greed"]
-        fg_label = {0: "خوف شديد", 25: "خوف", 50: "محايد", 75: "طمع", 100: "طمع شديد"}
-        closest = min(fg_label.keys(), key=lambda x: abs(x - fg))
-        msg += f"😱 Fear & Greed: {fg} ({fg_label[closest]})\n"
-
-    if analysis.get("top_gainers"):
-        msg += "\n🚀 أكبر ارتفاعات:\n"
-        for g in analysis["top_gainers"][:5]:
-            msg += f"  {g['symbol']}: +{g['change']:.1f}%\n"
-
-    if analysis.get("top_losers"):
-        msg += "\n📉 أكبر انخفاضات:\n"
-        for l in analysis["top_losers"][:5]:
-            msg += f"  {l['symbol']}: {l['change']:.1f}%\n"
+        fg_label = "خوف شديد" if fg < 25 else "خوف" if fg < 45 else "محايد" if fg < 55 else "طمع" if fg < 75 else "طمع شديد"
+        msg += f"😱 الخوف والطمع: {fg} ({fg_label})\n"
 
     if analysis.get("recommendation"):
-        msg += f"\n💡 التوصية: {analysis['recommendation']}\n"
+        msg += f"\n💡 {analysis['recommendation']}\n"
 
     msg += f"\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-    msg += "🤖 BBPro Signal Bot"
+    msg += "🤖 BBPro Signal"
 
     return msg
 
 
 def format_summary_message(signals: List[Dict]) -> str:
-    """تنسيق ملخص يومي/أسبوعي"""
+    """تنسيق ملخص يومي"""
     total = len(signals)
     buy_count = sum(1 for s in signals if s.get("signal_type") == "BUY")
     sell_count = total - buy_count
-
-    # Pairs count
-    pairs = set(s.get("symbol", "") for s in signals)
-
-    # Average confidence
     avg_conf = sum(s.get("confidence", 0) for s in signals) / max(total, 1)
 
-    msg = "📋 ملخص الإشارات اليومي\n"
+    msg = "📋 ملخص إشارات اليوم\n"
     msg += "━━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"📊 إجمالي الإشارات: {total}\n"
+    msg += f"📊 إجمالي: {total} إشارة\n"
     msg += f"🟢 شراء: {buy_count} | 🔴 بيع: {sell_count}\n"
-    msg += f"📈 متوسط الثقة: {avg_conf:.1f}%\n"
-    msg += f"💱 الأزواج المغطاة: {len(pairs)}\n\n"
+    msg += f"📈 متوسط الثقة: {avg_conf:.1f}%\n\n"
 
     # By trade type
     scalping = sum(1 for s in signals if s.get("trade_type") == "SCALPING")
@@ -255,34 +208,38 @@ def format_summary_message(signals: List[Dict]) -> str:
     msg += "توزيع حسب المخاطرة:\n"
     msg += f"  🟢 منخفضة: {low_risk}\n"
     msg += f"  🟡 متوسطة: {med_risk}\n"
-    msg += f"  🔴 عالية: {high_risk}\n"
+    msg += f"  🔴 عالية: {high_risk}\n\n"
+
+    # Channel distribution
+    public_count = sum(1 for s in signals if s.get("channel") == "PUBLIC")
+    private_count = sum(1 for s in signals if s.get("channel") == "PRIVATE")
+    msg += "القنوات:\n"
+    msg += f"  📢 عامة: {public_count}\n"
+    msg += f"  💎 خاصة: {private_count}\n"
 
     msg += f"\n📅 {datetime.now().strftime('%Y-%m-%d')}\n"
-    msg += "🤖 BBPro Signal Bot"
+    msg += "🤖 BBPro Signal"
 
     return msg
 
 
 def format_market_update(market_data: Dict) -> str:
-    """تنسيق تحديث سريع للسوق"""
-    msg = "📊 تحديث السوق السريع\n"
+    """تنسيق رسالة تحديث السوق"""
+    msg = "📊 تحديث سوق الذهب\n"
     msg += "━━━━━━━━━━━━━━━━━━━━\n"
 
-    if market_data.get("btc"):
-        msg += f"₿ BTC: ${market_data['btc']:,.0f}\n"
-    if market_data.get("eth"):
-        msg += f"Ξ ETH: ${market_data['eth']:,.0f}\n"
+    if market_data.get("gold_price"):
+        msg += f"🥇 XAU/USD: ${market_data['gold_price']:,.2f}\n"
+        ch = market_data.get("gold_change", 0)
+        msg += f"📊 التغير: {ch:+.2f}%\n"
 
-    if market_data.get("market_breadth"):
-        bullish, bearish = market_data["market_breadth"]
-        msg += f"\n📈 صاعد: {bullish} | 📉 هابط: {bearish}\n"
+    if market_data.get("vix"):
+        msg += f"😱 VIX: {market_data['vix']:.1f}\n"
 
-    if market_data.get("notable"):
-        msg += "\n⚡ حركات بارزة:\n"
-        for n in market_data["notable"][:5]:
-            msg += f"  {n['symbol']}: {n['change']:+.1f}%\n"
+    if market_data.get("dxy"):
+        msg += f"💵 DXY: {market_data['dxy']:.2f}\n"
 
-    msg += f"\n📅 {datetime.now().strftime('%H:%M')}\n"
-    msg += "🤖 BBPro Signal Bot"
+    msg += f"\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+    msg += "🤖 BBPro Signal"
 
     return msg
