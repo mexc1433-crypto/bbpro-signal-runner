@@ -90,7 +90,7 @@ class BBProSignalBot:
         self.bot: Optional[Bot] = None
         self.fetcher = MarketDataFetcher()
         self.risk_manager = RiskManager()
-        self.channel_manager = ChannelManager(CHANNEL_RULES)
+        self.channel_manager = ChannelManager()
         self.analyzer = MarketAnalyzer(self.fetcher)
         self.tracker = SignalTracker()
         self.calendar = EconomicCalendar()
