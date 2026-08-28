@@ -99,6 +99,26 @@ class BBProSignalBot:
         يمسح السوق بالكامل ويولّد الإشارات
         """
         all_signals = []
+
+        # فحص الإشارات المعلقة + تحديث التتبع
+        try:
+            ticker = self.fetcher.fetch_ticker("XAU/USD")
+            if ticker and ticker.get("last"):
+                updated = self.tracker.check_pending_signals(ticker["last"])
+                for s in updated:
+                    logger.info(f"📋 Signal {s['id']} → {s['result']} (exit={s['exit_price']})")
+                self.tracker.cleanup_old_signals(30)
+        except Exception as e:
+            logger.warning(f"Signal tracking check failed: {e}")
+
+        # إيقاف الإشارات وقت الأخبار عالية التأثير
+        try:
+            if self.calendar.is_high_impact_soon(30):
+                logger.warning("⚠️ High impact news soon - pausing signals")
+                return all_signals
+        except Exception as e:
+            logger.warning(f"Calendar check failed: {e}")
+
         pairs = TRADING_PAIRS
 
         # Determine which strategies to run based on trade type
@@ -163,6 +183,7 @@ class BBProSignalBot:
     # ═══════════════════════════════════════════════════════════
 
     async def process_signals(self, signals: List[Dict]):
+        """يوزع الإشارات على القنوات المناسبة"""
         # تحسين الإشارات بالتطابق متعدد الأطر
         try:
             confluence_data = self.confluence.analyze_confluence()
@@ -170,9 +191,10 @@ class BBProSignalBot:
                 for signal in signals:
                     self.confluence.enhance_signal_with_confluence(signal, confluence_data)
                 logger.info(f"Confluence: {confluence_data['confluence_level']} (+{confluence_data['confidence_boost']}%)")
+            else:
+                logger.info(f"Confluence: {confluence_data.get('confluence_level', 'N/A')} (no boost)")
         except Exception as e:
             logger.warning(f"Confluence analysis failed: {e}")
-        """يوزع الإشارات على القنوات المناسبة"""
         for signal in signals:
             # Calculate capital plans
             capital_plans = self.risk_manager.get_all_capital_plans(signal)
@@ -214,6 +236,15 @@ class BBProSignalBot:
                 parse_mode='HTML'
             )
             logger.info(f"Signal sent to {channel_type} channel: {signal['symbol']}")
+
+            # تتبع الإشارة في القناة الخاصة فقط (لتجنب التكرار)
+            if channel_type == "PRIVATE":
+                try:
+                    self.tracker.track_signal(signal)
+                    logger.info(f"📋 Tracking signal: {signal.get('signal_type', '?')} {signal.get('symbol', '?')}")
+                except Exception as e:
+                    logger.warning(f"Failed to track signal: {e}")
+
         except Exception as e:
             logger.error(f"Error sending message: {e}")
 
