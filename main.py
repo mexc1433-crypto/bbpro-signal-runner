@@ -12,8 +12,11 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 # Telegram
-from telegram import Bot, Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, ContextTypes,
+    CallbackQueryHandler, MessageHandler, filters
+)
 
 # Local imports
 from config import *
@@ -36,68 +39,156 @@ from analysis import MarketAnalyzer
 from signal_tracker import SignalTracker
 from economic_calendar import EconomicCalendar
 from confluence import ConfluenceAnalyzer
+from user_manager import UserManager, Encryption
+from auto_trader import AutoTrader
+from mexc_client import MexcClient
 
 # ═══════════════════════════════════════════════════════════════
-# Logging Setup
+# Logging
 # ═══════════════════════════════════════════════════════════════
 logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('bbpro_bot.log', encoding='utf-8'),
-    ]
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger("BBProBot")
 
+# Reduce noisy loggers
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+
 
 class BBProSignalBot:
-    """البوت الرئيسي لإشارات التداول"""
+    """البوت الرئيسي"""
+
+    # مراحل التسجيل
+    REG_STEP_UID = "awaiting_uid"
+    REG_STEP_API_KEY = "awaiting_api_key"
+    REG_STEP_API_SECRET = "awaiting_api_secret"
 
     def __init__(self):
-        self.bot = Bot(token=BOT_TOKEN)
+        self.bot: Optional[Bot] = None
         self.fetcher = MarketDataFetcher()
-        self.risk_manager = RiskManager()
-        self.channel_manager = ChannelManager()
+        self.risk_manager = RiskManager(CAPITAL_TIERS, CAPITAL_TIER_CONFIG)
+        self.channel_manager = ChannelManager(CHANNEL_RULES)
         self.analyzer = MarketAnalyzer(self.fetcher)
         self.tracker = SignalTracker()
         self.calendar = EconomicCalendar()
         self.confluence = ConfluenceAnalyzer(self.fetcher)
+        self.user_manager = UserManager()
+
+        # Auto-trader (سيتم تهيئته بعد قراءة env vars)
+        owner_api_key = os.getenv("MEXC_API_KEY", "")
+        owner_api_secret = os.getenv("MEXC_API_SECRET", "")
+        self.auto_trader = AutoTrader(self.user_manager, owner_api_key, owner_api_secret)
 
         self.strategies = ALL_STRATEGIES
         self.signal_history: List[Dict] = []
-        self.public_channel = PUBLIC_CHANNEL_ID
-        self.private_channel = PRIVATE_CHANNEL_ID
-        self._app = None  # Reference to the telegram Application
-        self.admin_id = ADMIN_ID  # only owner can use commands
+        self.private_channel = int(PRIVATE_CHANNEL_ID) if PRIVATE_CHANNEL_ID else None
+        self.public_channel = int(PUBLIC_CHANNEL_ID) if PUBLIC_CHANNEL_ID else None
+        self.admin_id = ADMIN_ID
+        self.mexc_referral_code = os.getenv("MEXC_REFERRAL_CODE", "")
 
-        logger.info("BBPro Signal Bot initialized")
+        # حالة التسجيل المؤقتة
+        self._registration_state: Dict[int, Dict] = {}
+
+    # ═══════════════════════════════════════════════════════════
+    # Helper Functions
+    # ═══════════════════════════════════════════════════════════
 
     def _is_admin(self, user_id: int) -> bool:
-        """يتحقق إن المستخدم هو الأدمن فقط"""
-        if self.admin_id and user_id == self.admin_id:
-            return True
-        return False
+        return user_id == self.admin_id
 
-    async def _check_admin(self, update: Update) -> bool:
-        """فحص الأدمن قبل أي أمر - يرفع غير المصرح"""
-        user_id = update.effective_user.id
-        if not self._is_admin(user_id):
-            logger.warning(f"⚠️ Unauthorized access by {user_id} ({update.effective_user.full_name})")
-            await update.message.reply_text(
-                "🚫 عذراً، هذا البوت خاص ولا يمكن استخدامه إلا من قبل المالك."
-            )
+    async def _check_channel_subscription(self, user_id: int) -> bool:
+        """فحص اشتراك المستخدم في القناة العامة"""
+        if not self.public_channel:
+            return True  # لو مفيش قناة، اسمح
+        try:
+            member = await self.bot.get_chat_member(self.public_channel, user_id)
+            return member.status in ["member", "administrator", "creator"]
+        except Exception as e:
+            logger.warning(f"Channel subscription check failed: {e}")
             return False
-        return True
+
+    def _get_main_menu(self, is_admin: bool = False) -> InlineKeyboardMarkup:
+        """القائمة الرئيسية بأزرار"""
+        buttons = [
+            [InlineKeyboardButton("📡 مسح السوق", callback_data="scan"),
+             InlineKeyboardButton("📊 حالة السوق", callback_data="status")],
+            [InlineKeyboardButton("🔍 تحليل السوق", callback_data="analysis"),
+             InlineKeyboardButton("📈 ملخص اليوم", callback_data="summary")],
+            [InlineKeyboardButton("🎯 تحليل التطابق", callback_data="confluence"),
+             InlineKeyboardButton("📅 الأحداث الاقتصادية", callback_data="calendar")],
+        ]
+
+        # أزرار المستخدم
+        user_buttons = [
+            [InlineKeyboardButton("👤 حسابي", callback_data="myaccount"),
+             InlineKeyboardButton("⚙️ الإعدادات", callback_data="settings")],
+        ]
+        buttons.extend(user_buttons)
+
+        # أزرار الأدمن فقط
+        if is_admin:
+            admin_buttons = [
+                [InlineKeyboardButton("📊 تقرير الأداء", callback_data="performance"),
+                 InlineKeyboardButton("👥 المستخدمين", callback_data="users")],
+                [InlineKeyboardButton("🤖 حالة Auto-Trade", callback_data="autostatus"),
+                 InlineKeyboardButton("⚙️ إعدادات الأدمن", callback_data="admin")],
+            ]
+            buttons.extend(admin_buttons)
+
+        return InlineKeyboardMarkup(buttons)
+
+    def _get_settings_menu(self) -> InlineKeyboardMarkup:
+        """قائمة الإعدادات"""
+        buttons = [
+            [InlineKeyboardButton("🟢 مخاطرة منخفضة", callback_data="risk_LOW"),
+             InlineKeyboardButton("🟡 مخاطرة متوسطة", callback_data="risk_MEDIUM")],
+            [InlineKeyboardButton("🔴 مخاطرة عالية", callback_data="risk_HIGH")],
+            [InlineKeyboardButton("⏸️ إيقاف التداول", callback_data="pause"),
+             InlineKeyboardButton("▶️ تشغيل التداول", callback_data="resume")],
+            [InlineKeyboardButton("🔙 رجوع", callback_data="main_menu")],
+        ]
+        return InlineKeyboardMarkup(buttons)
+
+    def _get_admin_menu(self) -> InlineKeyboardMarkup:
+        """قائمة الأدمن"""
+        buttons = [
+            [InlineKeyboardButton("📊 إحصائيات النظام", callback_data="admin_stats"),
+             InlineKeyboardButton("👥 قائمة المسجلين", callback_data="admin_users")],
+            [InlineKeyboardButton("🤖 تقرير Auto-Trade", callback_data="admin_auto"),
+             InlineKeyboardButton("💰 رصيد MEXC", callback_data="admin_balance")],
+            [InlineKeyboardButton("🔒 إغلاق كل الصفقات", callback_data="admin_closeall"),
+             InlineKeyboardButton("📋 تقرير الأداء", callback_data="admin_performance")],
+            [InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")],
+        ]
+        return InlineKeyboardMarkup(buttons)
+
+    def _get_registration_menu(self) -> InlineKeyboardMarkup:
+        """قائمة التسجيل"""
+        buttons = [
+            [InlineKeyboardButton("🚀 تسجيل الآن", callback_data="register_start")],
+            [InlineKeyboardButton("📋 كيف أبدأ؟", callback_data="howto")],
+        ]
+        return InlineKeyboardMarkup(buttons)
+
+    def _get_help_menu(self) -> InlineKeyboardMarkup:
+        """قائمة المساعدة"""
+        buttons = [
+            [InlineKeyboardButton("📡 مسح السوق", callback_data="scan"),
+             InlineKeyboardButton("📊 حالتي", callback_data="myaccount")],
+            [InlineKeyboardButton("⚙️ الإعدادات", callback_data="settings"),
+             InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")],
+        ]
+        return InlineKeyboardMarkup(buttons)
 
     # ═══════════════════════════════════════════════════════════
     # Market Scanning
     # ═══════════════════════════════════════════════════════════
 
     def scan_market(self, trade_type: str = "ALL") -> List[Dict]:
-        """
-        يمسح السوق بالكامل ويولّد الإشارات
-        """
+        """يمسح السوق بالكامل ويولّد الإشارات"""
         all_signals = []
 
         # فحص الإشارات المعلقة + تحديث التتبع
@@ -121,7 +212,6 @@ class BBProSignalBot:
 
         pairs = TRADING_PAIRS
 
-        # Determine which strategies to run based on trade type
         if trade_type == "SCALPING":
             timeframes = TIMEFRAMES["SCALPING"]
             strategy_names = ["scalping"]
@@ -133,46 +223,38 @@ class BBProSignalBot:
             strategy_names = ["breakout", "swing", "multi_confluence"]
         else:
             strategy_names = list(self.strategies.keys())
-            timeframes = []
+            timeframes = ["5m", "15m", "1h", "4h", "1d"]
 
         for symbol in pairs:
-            logger.info(f"Scanning {symbol}...")
+            for timeframe in timeframes:
+                try:
+                    logger.info(f"Scanning {symbol} {timeframe}...")
+                    df = self.fetcher.fetch_ohlcv(symbol, timeframe, 200)
 
-            for strat_name in strategy_names:
-                strat_config = self.strategies[strat_name]
-                strat_func = strat_config["func"]
-                strat_trade_type = strat_config["trade_type"]
-
-                # Skip if trade type doesn't match (when filtering)
-                if trade_type != "ALL" and strat_trade_type != trade_type:
-                    if trade_type == "MEDIUM" and strat_trade_type == "MEDIUM":
-                        pass
-                    elif trade_type == "SWING" and strat_trade_type == "SWING":
-                        pass
-                    elif trade_type == "SCALPING" and strat_trade_type == "SCALPING":
-                        pass
-                    else:
+                    if df.empty or len(df) < 50:
+                        logger.warning(f"Insufficient data for {symbol} {timeframe}")
                         continue
 
-                # Get timeframes for this strategy's trade type
-                tfs = TIMEFRAMES.get(strat_trade_type, ["4h"])
-
-                for tf in tfs:
-                    try:
-                        df = self.fetcher.fetch_ohlcv(symbol, tf, 200)
-                        if df.empty or len(df) < 50:
+                    for strat_name in strategy_names:
+                        if strat_name not in self.strategies:
                             continue
+                        try:
+                            strat_config = self.strategies[strat_name]
+                            func = strat_config["func"]
+                            trade_t = strat_config["trade_type"]
+                            signal = func(df, symbol, trade_t)
 
-                        signal = strat_func(df, symbol, strat_trade_type)
-                        if signal and signal.get("signal_type") != "NEUTRAL":
-                            signal["symbol"] = symbol
-                            signal["timeframe"] = tf
-                            all_signals.append(signal)
-                            logger.info(f"Signal found: {symbol} {signal['signal_type']} "
-                                       f"({signal['strategy_name']}) confidence={signal['confidence']}%")
+                            if signal and signal.get("signal_type") != "NEUTRAL":
+                                signal["strategy_name"] = strat_name
+                                signal["timeframe"] = timeframe
+                                signal["trade_type"] = trade_t
+                                signal["timestamp"] = datetime.now().strftime('%Y-%m-%d %H:%M')
+                                all_signals.append(signal)
+                        except Exception as e:
+                            logger.error(f"Error scanning {symbol} {tf} {strat_name}: {e}")
 
-                    except Exception as e:
-                        logger.error(f"Error scanning {symbol} {tf} {strat_name}: {e}")
+                except Exception as e:
+                    logger.error(f"Error fetching {symbol} {timeframe}: {e}")
 
         # Sort by confidence
         all_signals.sort(key=lambda x: x["confidence"], reverse=True)
@@ -195,11 +277,9 @@ class BBProSignalBot:
                 logger.info(f"Confluence: {confluence_data.get('confluence_level', 'N/A')} (no boost)")
         except Exception as e:
             logger.warning(f"Confluence analysis failed: {e}")
-        for signal in signals:
-            # Calculate capital plans
-            capital_plans = self.risk_manager.get_all_capital_plans(signal)
 
-            # Determine which channels to send to
+        for signal in signals:
+            capital_plans = self.risk_manager.get_all_capital_plans(signal)
             channels = self.channel_manager.get_channel_for_signal(signal)
 
             for channel in channels:
@@ -211,12 +291,46 @@ class BBProSignalBot:
                     await self.send_signal_to_channel(signal, capital_plans, channel)
                     self.channel_manager.record_signal(channel, signal)
                     self.signal_history.append({**signal, "channel": channel})
-
-                    # Avoid sending too many at once
                     await asyncio.sleep(2)
-
                 except Exception as e:
                     logger.error(f"Error sending to {channel}: {e}")
+
+        # 🤖 تنفيذ تلقائي على كل الحسابات
+        if signals:
+            try:
+                exec_results = await self.auto_trader.execute_for_everyone(signals[0])
+                if exec_results["total_executed"] > 0 or exec_results["total_failed"] > 0:
+                    report = self.auto_trader.format_execution_report(exec_results)
+                    # إرسال تقرير للأدمن
+                    if self.private_channel:
+                        await self.bot.send_message(chat_id=self.private_channel, text=report)
+                    # إشعار المستخدمين
+                    pending = self.auto_trader.get_pending_notifications()
+                    for tg_id, notif in pending.items():
+                        try:
+                            msg = self._format_user_notification(notif["signal"], notif["result"])
+                            await self.bot.send_message(chat_id=tg_id, text=msg)
+                        except Exception as e:
+                            logger.warning(f"Failed to notify user {tg_id}: {e}")
+            except Exception as e:
+                logger.error(f"Auto-trade execution error: {e}")
+
+    def _format_user_notification(self, signal: Dict, result: Dict) -> str:
+        """إشعار المستخدم بتنفيذ صفقة على حسابه"""
+        side = "شراء 🟢" if result.get("side") == "buy" else "بيع 🔴"
+        msg = "🤖 تم تنفيذ صفقة تلقائياً على حسابك\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━\n"
+        msg += f"📊 {signal.get('symbol', 'XAU/USD')} {side}\n"
+        msg += f"💰 السعر: {result.get('fill_price', 0):.2f}\n"
+        msg += f"📦 الحجم: {result.get('amount', 0)}\n"
+        msg += f"📈 الرافعة: {result.get('leverage', 10)}x\n"
+        msg += f"🛑 وقف الخسارة: {signal.get('stop_loss', 0):.2f}\n"
+        msg += f"🎯 هدف: {signal.get('take_profit_1', 0):.2f}\n"
+        msg += f"📋 الاستراتيجية: {signal.get('strategy_name', '')}\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━\n"
+        msg += f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        msg += "🤖 BBPro Signal"
+        return msg
 
     async def send_signal_to_channel(self, signal: Dict, capital_plans: List[Dict],
                                        channel_type: str):
@@ -237,7 +351,7 @@ class BBProSignalBot:
             )
             logger.info(f"Signal sent to {channel_type} channel: {signal['symbol']}")
 
-            # تتبع الإشارة في القناة الخاصة فقط (لتجنب التكرار)
+            # تتبع الإشارة في القناة الخاصة فقط
             if channel_type == "PRIVATE":
                 try:
                     self.tracker.track_signal(signal)
@@ -247,6 +361,636 @@ class BBProSignalBot:
 
         except Exception as e:
             logger.error(f"Error sending message: {e}")
+
+    # ═══════════════════════════════════════════════════════════
+    # Telegram Commands
+    # ═══════════════════════════════════════════════════════════
+
+    async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /start — يرحب بالمستخدم ويظهر القائمة"""
+        user = update.effective_user
+        user_id = user.id
+        is_admin = self._is_admin(user_id)
+
+        # لو أدمن — اعرض القائمة الكاملة
+        if is_admin:
+            welcome = (
+                "🤖 **BBPro Signal Bot — وضع الأدمن**\n\n"
+                "📊 13 استراتيجية | 22+ مؤشر | XAU/USD فقط\n"
+                "🤖 تنفيذ تلقائي على MEXC\n"
+                "👥 نظام إحالات + أعضاء\n\n"
+                "اختر من القائمة:"
+            )
+            await update.message.reply_text(
+                welcome,
+                reply_markup=self._get_main_menu(is_admin=True)
+            )
+            return
+
+        # لو مستخدم عادي ومسجل — اعرض القائمة
+        if self.user_manager.is_registered(user_id):
+            user_data = self.user_manager.get_user(user_id)
+            if user_data.get("status") == "BANNED":
+                await update.message.reply_text("❌ تم حظر حسابك. تواصل مع الإدارة.")
+                return
+
+            welcome = (
+                f"أهلاً {user.first_name}! 👋\n\n"
+                "🤖 BBPro Signal Bot\n"
+                "📊 توصيات ذهب (XAU/USD) + تنفيذ تلقائي\n\n"
+                "اختر من القائمة:"
+            )
+            await update.message.reply_text(
+                welcome,
+                reply_markup=self._get_main_menu(is_admin=False)
+            )
+            return
+
+        # لو مستخدم جديد غير مسجل — اعرض شاشة التسجيل
+        ref_link = self.user_manager.get_referral_link(self.mexc_referral_code)
+        welcome = (
+            "🤖 أهلاً بك في BBPro Signal Bot!\n\n"
+            "📊 بوت توصيات الذهب (XAU/USD)\n"
+            "🤖 تنفيذ تلقائي على MEXC\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📋 **للتسجيل تحتاج:**\n\n"
+            "1️⃣ التسجيل في MEXC برابط الإحالة\n"
+            f"   👉 {ref_link}\n\n"
+            "2️⃣ إنشاء API Key على MEXC\n"
+            "   (صلاحيات: قراءة + تداول، بدون سحب)\n\n"
+            "3️⃣ الاشتراك في القناة العامة\n\n"
+            "4️⃣ إرسال MEXC UID + API Key للبوت\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "اضغط زر التسجيل للبدء 🚀"
+        )
+        await update.message.reply_text(
+            welcome,
+            reply_markup=self._get_registration_menu()
+        )
+
+    async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /help"""
+        user_id = update.effective_user.id
+        is_admin = self._is_admin(user_id)
+
+        help_text = (
+            "📋 **مساعدة BBPro Signal Bot**\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📊 **التوصيات:**\n"
+            "• مسح السوق الفوري\n"
+            "• تحليل شامل للسوق\n"
+            "• ملخص إشارات اليوم\n\n"
+            "🤖 **التداول التلقائي:**\n"
+            "• تنفيذ تلقائي على MEXC\n"
+            "• SL و TP تلقائي\n"
+            "• إدارة مخاطرة ذكية\n\n"
+            "⚙️ **الإعدادات:**\n"
+            "• تحديد مستوى المخاطرة\n"
+            "• إيقاف/تشغيل التداول\n"
+            "• معلومات حسابك\n\n"
+            "📅 **الأدوات:**\n"
+            "• التقويم الاقتصادي\n"
+            "• تحليل التطابق متعدد الأطر\n"
+            "• تتبع أداء الإشارات\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "💡 **ملاحظات مهمة:**\n"
+            "• التوصيات للتحليل فقط، القرار قرارك\n"
+            "• التداول في الذهب ينطوي على مخاطر\n"
+            "• لا تستثمر أكثر مما يمكنك تحمل خسارته\n"
+            "• تحقق دائماً من صفقاتك على MEXC\n"
+        )
+
+        if is_admin:
+            help_text += "\n🔧 **أوامر الأدمن:**\n• /users — المسجلين\n• /stats — إحصائيات\n• /autostatus — حالة Auto-Trade\n"
+
+        await update.message.reply_text(
+            help_text,
+            reply_markup=self._get_help_menu()
+        )
+
+    async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /status"""
+        user_id = update.effective_user.id
+        is_admin = self._is_admin(user_id)
+
+        # حالة البوت
+        status = (
+            "📊 **حالة BBPro Signal Bot**\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📊 الرمز: XAU/USD (الذهب)\n"
+            f"📈 الاستراتيجيات: 13\n"
+            f"📏 المؤشرات: 22+\n"
+            f"📡 القناة العامة: {'✅' if self.public_channel else '❌'}\n"
+            f"📡 القناة الخاصة: {'✅' if self.private_channel else '❌'}\n"
+            f"🤖 Auto-Trade: {'✅ مفعل' if self.auto_trader.owner_client else '❌ غير مفعل'}\n"
+            f"👥 المسجلين: {self.user_manager.get_stats()['total']}\n"
+            f"📋 إشارات اليوم: {len(self.signal_history)}\n"
+            f"🟢 الحالة: يعمل\n"
+            "━━━━━━━━━━━━━━━━━━━━"
+        )
+
+        # لو أدمن، أضف معلومات إضافية
+        if is_admin:
+            stats = self.user_manager.get_stats()
+            status += f"\n🔧 **إحصائيات الأدمن:**\n"
+            status += f"🟢 نشطين: {stats['active']} | ⏸️ متوقفين: {stats['paused']}\n"
+            status += f"📋 إجمالي الصفقات: {stats['total_trades']}\n"
+            status += f"💰 إجمالي PnL: ${stats['total_pnl']:.2f}\n"
+
+        await update.message.reply_text(status)
+
+    async def cmd_scan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /scan — مسح فوري"""
+        user_id = update.effective_user.id
+        is_admin = self._is_admin(user_id)
+
+        # لو مش أدمن ولا مسجل
+        if not is_admin and not self.user_manager.is_registered(user_id):
+            await update.message.reply_text("❌ لازم تسجل أول مرة. اكتب /start")
+            return
+
+        await update.message.reply_text("🔄 جاري مسح السوق... قد يستغرق دقيقة")
+        signals = self.scan_market("ALL")
+        if signals:
+            await self.process_signals(signals)
+            await update.message.reply_text(f"✅ تم العثور على {len(signals)} إشارة!")
+        else:
+            await update.message.reply_text("⚠️ لا توجد إشارات في الوقت الحالي")
+
+    async def cmd_analysis(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /analysis"""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
+            await update.message.reply_text("❌ لازم تسجل أول مرة. اكتب /start")
+            return
+        await update.message.reply_text("📊 جاري تحليل السوق...")
+        await self.send_market_analysis()
+
+    async def cmd_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /summary"""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
+            await update.message.reply_text("❌ لازم تسجل أول مرة. اكتب /start")
+            return
+        if not self.signal_history:
+            await update.message.reply_text("⚠️ لا توجد إشارات اليوم بعد")
+            return
+        message = format_summary_message(self.signal_history)
+        await update.message.reply_text(message, parse_mode='HTML')
+
+    async def cmd_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /performance"""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
+            await update.message.reply_text("❌ لازم تسجل أول مرة. اكتب /start")
+            return
+        report = self.tracker.get_performance_report(days=7)
+        await update.message.reply_text(report)
+
+    async def cmd_calendar(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /calendar"""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
+            await update.message.reply_text("❌ لازم تسجل أول مرة. اكتب /start")
+            return
+        events = self.calendar.get_upcoming_events(hours_ahead=48)
+        msg = self.calendar.format_events_message(events)
+        await update.message.reply_text(msg)
+
+    async def cmd_confluence(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /confluence"""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
+            await update.message.reply_text("❌ لازم تسجل أول مرة. اكتب /start")
+            return
+        await update.message.reply_text("📊 جاري تحليل التطابق...")
+        data = self.confluence.analyze_confluence()
+        msg = self.confluence.format_confluence_report(data)
+        await update.message.reply_text(msg)
+
+    # ═══════════════════════════════════════════════════════════
+    # Registration Flow (للمستخدمين الجدد)
+    # ═══════════════════════════════════════════════════════════
+
+    async def handle_registration(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """معالجة رسائل التسجيل (MEXC UID, API Key, API Secret)"""
+        user_id = update.effective_user.id
+        text = update.message.text.strip()
+
+        if user_id not in self._registration_state:
+            return
+
+        state = self._registration_state[user_id]
+        step = state.get("step")
+
+        if step == self.REG_STEP_UID:
+            # استلام MEXC UID
+            if not text.isdigit():
+                await update.message.reply_text(
+                    "❌ MEXC UID يجب أن يكون رقم\n"
+                    "أدخل رقم الـ UID الصحيح:"
+                )
+                return
+
+            state["uid"] = text
+            state["step"] = self.REG_STEP_API_KEY
+            await update.message.reply_text(
+                "✅ تم استلام MEXC UID\n\n"
+                "🔑 الآن أرسل **API Key** من MEXC\n"
+                "📍 تجده في: MEXC → Profile → API Management\n\n"
+                "⚠️ تأكد أن API Key لها صلاحيات:\n"
+                "✅ Read (قراءة)\n"
+                "✅ Spot Trading أو Futures Trading\n"
+                "❌ Withdrawals (يجب أن تكون معطلة)"
+            )
+
+        elif step == self.REG_STEP_API_KEY:
+            # استلام API Key
+            if len(text) < 10:
+                await update.message.reply_text("❌ API Key غير صحيح. أعد الإرسال:")
+                return
+
+            state["api_key"] = text
+            state["step"] = self.REG_STEP_API_SECRET
+            await update.message.reply_text(
+                "✅ تم استلام API Key\n\n"
+                "🔐 الآن أرسل **API Secret Key**\n"
+                "⚠️ هذا آخر خطوة — سيتم تشفير مفتاحك فوراً"
+            )
+
+        elif step == self.REG_STEP_API_SECRET:
+            # استلام API Secret
+            if len(text) < 10:
+                await update.message.reply_text("❌ API Secret غير صحيح. أعد الإرسال:")
+                return
+
+            # فحص صلاحية API
+            await update.message.reply_text("⏳ جاري التحقق من API Keys...")
+
+            validation = MexcClient.validate_api(state["api_key"], text)
+
+            if not validation.get("valid"):
+                await update.message.reply_text(
+                    f"❌ فشل التحقق من API Keys\n"
+                    f"السبب: {validation.get('error', 'غير معروف')}\n\n"
+                    "تأكد من:\n"
+                    "• المفاتيح صحيحة\n"
+                    "• ليست معطلة\n"
+                    "• لديها صلاحية تداول\n\n"
+                    "اكتب /start للبدء من جديد"
+                )
+                del self._registration_state[user_id]
+                return
+
+            # فحص اشتراك القناة
+            is_subscribed = await self._check_channel_subscription(user_id)
+            if not is_subscribed:
+                channel_link = f"t.me/c/{abs(self.public_channel) - 1000000000000}" if self.public_channel else ""
+                await update.message.reply_text(
+                    "❌ يجب الاشتراك في القناة العامة أولاً!\n\n"
+                    f"📎 اشترك هنا: {channel_link}\n\n"
+                    "ثم اكتب /start مرة أخرى"
+                )
+                del self._registration_state[user_id]
+                return
+
+            # ✅ تسجيل المستخدم
+            username = update.effective_user.username or f"user_{user_id}"
+            self.user_manager.register_user(
+                telegram_id=user_id,
+                username=username,
+                mexc_uid=state["uid"],
+                api_key=state["api_key"],
+                api_secret=text,
+            )
+
+            del self._registration_state[user_id]
+
+            success_msg = (
+                "🎉 **تم التسجيل بنجاح!**\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"✅ MEXC UID: {state['uid']}\n"
+                f"💰 رصيد MEXC: ${validation.get('usdt_balance', 0):.2f}\n"
+                f"🔐 API Keys: مشفرة ✅\n"
+                f"🤖 التداول التلقائي: مفعل ✅\n"
+                f"⚖️ المخاطرة: متوسطة (2%)\n"
+                f"📈 الرافعة: 10x\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "📊 **ماذا سيحدث الآن؟**\n"
+                "• البوت سيراقب السوق تلقائياً\n"
+                "• عند ظهور إشارة ذهب قوية → ستنفذ على حسابك\n"
+                "• ستستلم إشعار بكل صفقة\n"
+                "• يمكنك التحكم في الإعدادات من القائمة\n\n"
+                "⚠️ **ملاحظات مهمة:**\n"
+                "• لا تستثمر أكثر مما يمكنك تحمل خسارته\n"
+                "• راجع صفقاتك على MEXC بانتظام\n"
+                "• يمكنك إيقاف التداول في أي وقت\n"
+            )
+            await update.message.reply_text(
+                success_msg,
+                reply_markup=self._get_main_menu(is_admin=self._is_admin(user_id))
+            )
+
+    # ═══════════════════════════════════════════════════════════
+    # Callback Query Handler (الأزرار)
+    # ═══════════════════════════════════════════════════════════
+
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """معالجة أزرار Inline Keyboard"""
+        query = update.callback_query
+        await query.answer()
+        user_id = query.from_user.id
+        data = query.data
+        is_admin = self._is_admin(user_id)
+
+        # ===== القائمة الرئيسية =====
+        if data == "main_menu":
+            if is_admin:
+                await query.edit_message_text(
+                    "🤖 BBPro Signal Bot — القائمة الرئيسية",
+                    reply_markup=self._get_main_menu(is_admin=True)
+                )
+            elif self.user_manager.is_registered(user_id):
+                await query.edit_message_text(
+                    "🤖 BBPro Signal Bot — القائمة الرئيسية",
+                    reply_markup=self._get_main_menu(is_admin=False)
+                )
+            else:
+                await query.edit_message_text(
+                    "🤖 أهلاً بك! للتسجيل اضغط الزر أدناه",
+                    reply_markup=self._get_registration_menu()
+                )
+
+        # ===== التسجيل =====
+        elif data == "register_start":
+            if self.user_manager.is_registered(user_id):
+                await query.edit_message_text("✅ أنت مسجل بالفعل!")
+                return
+
+            self._registration_state[user_id] = {"step": self.REG_STEP_UID}
+            ref_link = self.user_manager.get_referral_link(self.mexc_referral_code)
+            await query.edit_message_text(
+                "🚀 **بدء التسجيل**\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "1️⃣ سجل في MEXC أولاً (لو لم تسجل):\n"
+                f"   {ref_link}\n\n"
+                "2️⃣ أنشئ API Key على MEXC:\n"
+                "   MEXC → Profile → API Management\n\n"
+                "3️⃣ اشترك في القناة العامة\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "📝 **الخطوة 1:** أرسل MEXC UID الخاص بك\n"
+                "📍 تجده في: MEXC → Profile → رقم الـ UID"
+            )
+
+        elif data == "howto":
+            ref_link = self.user_manager.get_referral_link(self.mexc_referral_code)
+            await query.edit_message_text(
+                "📋 **كيف أبدأ؟ — دليل خطوة بخطوة**\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "1️⃣ **سجل في MEXC**\n"
+                f"   👉 {ref_link}\n"
+                "   (تحصل على بونص تصل لـ 12K USDT)\n\n"
+                "2️⃣ **أكمل KYC** (تأكيد الهوية)\n"
+                "   MEXC → Profile → KYC Verification\n\n"
+                "3️⃣ **أودع USDT** في حسابك\n"
+                "   (تحويل من أي محفظة أو شراء مباشر)\n\n"
+                "4️⃣ **أنشئ API Key**\n"
+                "   MEXC → Profile → API Management → Create\n"
+                "   ✅ Read + Futures Trading\n"
+                "   ❌ Withdrawals (معطلة!)\n\n"
+                "5️⃣ **اشترك في القناة العامة**\n\n"
+                "6️⃣ **سجل في البوت**\n"
+                "   اضغط: 🚀 تسجيل الآن\n"
+                "   أدخل: MEXC UID → API Key → API Secret\n\n"
+                "7️⃣ **استمتع بالتداول التلقائي!** 🎉\n"
+                "   البوت سيراقب السوق وينفذ الصفقات على حسابك\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "⚠️ التداول ينطوي على مخاطر — لا تستثمر أكثر مما تتحمل",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🚀 تسجيل الآن", callback_data="register_start"),
+                    InlineKeyboardButton("🔙 رجوع", callback_data="main_menu"),
+                ]])
+            )
+
+        # ===== أوامر السوق =====
+        elif data == "scan":
+            await query.edit_message_text("🔄 جاري مسح السوق...")
+            signals = self.scan_market("ALL")
+            if signals:
+                await self.process_signals(signals)
+                await query.edit_message_text(
+                    f"✅ تم العثور على {len(signals)} إشارة!",
+                    reply_markup=self._get_main_menu(is_admin)
+                )
+            else:
+                await query.edit_message_text(
+                    "⚠️ لا توجد إشارات في الوقت الحالي",
+                    reply_markup=self._get_main_menu(is_admin)
+                )
+
+        elif data == "status":
+            await self.cmd_status(update, context)
+
+        elif data == "analysis":
+            await query.edit_message_text("📊 جاري تحليل السوق...")
+            await self.send_market_analysis()
+
+        elif data == "summary":
+            if not self.signal_history:
+                await query.edit_message_text("⚠️ لا توجد إشارات اليوم")
+            else:
+                message = format_summary_message(self.signal_history)
+                await query.edit_message_text(message[:4096])
+
+        elif data == "confluence":
+            await query.edit_message_text("📊 جاري تحليل التطابق...")
+            conf_data = self.confluence.analyze_confluence()
+            msg = self.confluence.format_confluence_report(conf_data)
+            await query.edit_message_text(msg)
+
+        elif data == "calendar":
+            events = self.calendar.get_upcoming_events(hours_ahead=48)
+            msg = self.calendar.format_events_message(events)
+            await query.edit_message_text(msg)
+
+        elif data == "performance":
+            if is_admin:
+                report = self.tracker.get_performance_report(days=7)
+                await query.edit_message_text(report)
+            else:
+                await query.edit_message_text("❌ للأدمن فقط")
+
+        # ===== حساب المستخدم =====
+        elif data == "myaccount":
+            info = self.user_manager.format_user_info(user_id)
+            await query.edit_message_text(
+                info,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⚙️ الإعدادات", callback_data="settings"),
+                    InlineKeyboardButton("🔙 رجوع", callback_data="main_menu"),
+                ]])
+            )
+
+        elif data == "settings":
+            user = self.user_manager.get_user(user_id)
+            if not user and not is_admin:
+                await query.edit_message_text("❌ غير مسجل")
+                return
+            await query.edit_message_text(
+                "⚙️ **الإعدادات**\n\n"
+                "اختر مستوى المخاطرة أو تحكم في التداول:",
+                reply_markup=self._get_settings_menu()
+            )
+
+        # ===== إعدادات المخاطرة =====
+        elif data == "risk_LOW":
+            self.user_manager.set_risk_level(user_id, "LOW")
+            await query.edit_message_text(
+                "✅ تم ضبط المخاطرة: 🟢 منخفض (1%، 5x)\n"
+                "أقل مخاطرة = أمان أكثر",
+                reply_markup=self._get_settings_menu()
+            )
+
+        elif data == "risk_MEDIUM":
+            self.user_manager.set_risk_level(user_id, "MEDIUM")
+            await query.edit_message_text(
+                "✅ تم ضبط المخاطرة: 🟡 متوسط (2%، 10x)\n"
+                "متوازن بين العائد والمخاطرة",
+                reply_markup=self._get_settings_menu()
+            )
+
+        elif data == "risk_HIGH":
+            self.user_manager.set_risk_level(user_id, "HIGH")
+            await query.edit_message_text(
+                "✅ تم ضبط المخاطرة: 🔴 عالي (5%، 20x)\n"
+                "⚠️ مخاطرة عالية — كن حذراً!",
+                reply_markup=self._get_settings_menu()
+            )
+
+        elif data == "pause":
+            self.user_manager.pause_user(user_id)
+            await query.edit_message_text(
+                "⏸️ تم إيقاف التداول التلقائي على حسابك\n"
+                "لن يتم تنفيذ صفقات جديدة حتى تشغله",
+                reply_markup=self._get_settings_menu()
+            )
+
+        elif data == "resume":
+            self.user_manager.resume_user(user_id)
+            await query.edit_message_text(
+                "▶️ تم تشغيل التداول التلقائي\n"
+                "سيتم تنفيذ الإشارات على حسابك",
+                reply_markup=self._get_settings_menu()
+            )
+
+        # ===== أوامر الأدمن =====
+        elif data == "users" and is_admin:
+            stats = self.user_manager.format_admin_stats()
+            await query.edit_message_text(
+                stats[:4096],
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 رجوع", callback_data="main_menu"),
+                ]])
+            )
+
+        elif data == "autostatus" and is_admin:
+            if self.auto_trader.owner_client:
+                balance = self.auto_trader.owner_client.get_balance()
+                positions = self.auto_trader.owner_client.get_positions()
+                msg = "🤖 **حالة Auto-Trade**\n\n"
+                msg += f"👑 حساب الأدمن: {'✅' if balance.get('success') else '❌'}\n"
+                msg += f"💰 الرصيد: ${balance.get('free', 0):.2f}\n"
+                msg += f"📊 صفقات مفتوحة: {len(positions)}\n"
+                if positions:
+                    for p in positions:
+                        msg += f"  • {p['side']} {p['size']} @ {p['entry_price']:.2f} | PnL: ${p['unrealized_pnl']:.2f}\n"
+                msg += f"\n👥 المستخدمين النشطين: {len(self.user_manager.get_active_users())}"
+                await query.edit_message_text(msg)
+            else:
+                await query.edit_message_text(
+                    "❌ Auto-Trade غير مفعل\n"
+                    "أضف MEXC_API_KEY و MEXC_API_SECRET في Railway"
+                )
+
+        elif data == "admin" and is_admin:
+            await query.edit_message_text(
+                "⚙️ **لوحة تحكم الأدمن**\n\n"
+                "اختر ما تريد:",
+                reply_markup=self._get_admin_menu()
+            )
+
+        elif data == "admin_stats" and is_admin:
+            stats = self.user_manager.format_admin_stats()
+            await query.edit_message_text(
+                stats[:4096],
+                reply_markup=self._get_admin_menu()
+            )
+
+        elif data == "admin_users" and is_admin:
+            users = self.user_manager.get_all_users()
+            if not users:
+                await query.edit_message_text(
+                    "👥 لا يوجد مسجلين بعد",
+                    reply_markup=self._get_admin_menu()
+                )
+                return
+            msg = "👥 **المسجلين**\n\n"
+            for u in users[:20]:
+                status = {"ACTIVE": "🟢", "PAUSED": "⏸️", "BANNED": "🔴"}.get(u.get("status"), "❓")
+                msg += f"{status} @{u.get('username', 'N/A')} (UID: {u.get('mexc_uid', '?')})\n"
+                msg += f"   📋 {u.get('total_trades', 0)} صفقة | 💰 ${u.get('total_pnl', 0):.2f}\n"
+            await query.edit_message_text(
+                msg[:4096],
+                reply_markup=self._get_admin_menu()
+            )
+
+        elif data == "admin_auto" and is_admin:
+            await query.edit_message_text(
+                "🤖 **تقرير Auto-Trade**\n\n"
+                f"👑 Owner Client: {'✅' if self.auto_trader.owner_client else '❌'}\n"
+                f"👥 Active Users: {len(self.user_manager.get_active_users())}\n"
+                f"📋 Total Trades: {self.user_manager.get_stats()['total_trades']}\n"
+                f"💰 Total PnL: ${self.user_manager.get_stats()['total_pnl']:.2f}",
+                reply_markup=self._get_admin_menu()
+            )
+
+        elif data == "admin_balance" and is_admin:
+            if self.auto_trader.owner_client:
+                balance = self.auto_trader.owner_client.get_balance()
+                positions = self.auto_trader.owner_client.get_positions()
+                msg = "💰 **رصيد MEXC**\n\n"
+                msg += f"💵 المتاح: ${balance.get('free', 0):.2f}\n"
+                msg += f"📊 الإجمالي: ${balance.get('total', 0):.2f}\n"
+                msg += f"📈 صفقات مفتوحة: {len(positions)}\n"
+                await query.edit_message_text(msg, reply_markup=self._get_admin_menu())
+            else:
+                await query.edit_message_text("❌ MEXC API غير مفعل")
+
+        elif data == "admin_closeall" and is_admin:
+            result = await self.auto_trader.close_all_for_owner()
+            if result.get("success"):
+                await query.edit_message_text(
+                    f"✅ تم إغلاق {result.get('closed', 0)} صفقة",
+                    reply_markup=self._get_admin_menu()
+                )
+            else:
+                await query.edit_message_text(
+                    f"❌ فشل: {result.get('error', 'خطأ')}",
+                    reply_markup=self._get_admin_menu()
+                )
+
+        elif data == "admin_performance" and is_admin:
+            report = self.tracker.get_performance_report(days=7)
+            await query.edit_message_text(report, reply_markup=self._get_admin_menu())
+
+    async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """معالجة الرسائل النصية العادية (خلال التسجيل)"""
+        user_id = update.effective_user.id
+        if user_id in self._registration_state:
+            await self.handle_registration(update, context)
+        else:
+            # لو مش في حالة تسجيل، اعرض القائمة
+            await self.cmd_start(update, context)
 
     # ═══════════════════════════════════════════════════════════
     # Market Analysis
@@ -268,43 +1012,29 @@ class BBProSignalBot:
                         )
                     except Exception as e:
                         logger.error(f"Error sending analysis: {e}")
-
-            logger.info("Market analysis sent")
         except Exception as e:
-            logger.error(f"Error in market analysis: {e}")
-
-    # ═══════════════════════════════════════════════════════════
-    # Daily Summary
-    # ═══════════════════════════════════════════════════════════
+            logger.error(f"Analysis error: {e}")
 
     async def send_daily_summary(self):
-        """يرسل ملخص يومي"""
-        if not self.signal_history:
+        """يرسل ملخص يومي للقناة الخاصة"""
+        if not self.private_channel:
             return
-
-        message = format_summary_message(self.signal_history)
-
-        for channel_id in [self.private_channel]:
-            if channel_id:
-                try:
-                    await self.bot.send_message(
-                        chat_id=channel_id,
-                        text=message,
-                        parse_mode='HTML'
-                    )
-                except Exception as e:
-                    logger.error(f"Error sending summary: {e}")
-
-        # Reset daily counts
-        self.channel_manager.reset_daily_counts()
-        self.signal_history.clear()
+        try:
+            if self.signal_history:
+                message = format_summary_message(self.signal_history)
+                await self.bot.send_message(
+                    chat_id=self.private_channel,
+                    text=message,
+                    parse_mode='HTML'
+                )
+        except Exception as e:
+            logger.error(f"Daily summary error: {e}")
 
     # ═══════════════════════════════════════════════════════════
     # Scheduled Scans
     # ═══════════════════════════════════════════════════════════
 
     async def run_scalping_scan(self):
-        """مسح السكالبينج كل 15 دقيقة"""
         logger.info("🔄 Starting SCALPING scan...")
         signals = self.scan_market("SCALPING")
         if signals:
@@ -312,7 +1042,6 @@ class BBProSignalBot:
         logger.info(f"Scalping scan complete: {len(signals)} signals found")
 
     async def run_medium_scan(self):
-        """مسح المتوسط كل ساعة"""
         logger.info("🔄 Starting MEDIUM scan...")
         signals = self.scan_market("MEDIUM")
         if signals:
@@ -320,7 +1049,6 @@ class BBProSignalBot:
         logger.info(f"Medium scan complete: {len(signals)} signals found")
 
     async def run_swing_scan(self):
-        """مسح السوينج كل 4 ساعات"""
         logger.info("🔄 Starting SWING scan...")
         signals = self.scan_market("SWING")
         if signals:
@@ -328,133 +1056,11 @@ class BBProSignalBot:
         logger.info(f"Swing scan complete: {len(signals)} signals found")
 
     # ═══════════════════════════════════════════════════════════
-    # Bot Commands
-    # ═══════════════════════════════════════════════════════════
-
-    async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """أمر /start"""
-        if not await self._check_admin(update):
-            return
-        await update.message.reply_text(
-            "🤖 **BBPro Signal Bot**\n\n"
-            "بوت إشارات تداول العملات الرقمية\n"
-            "📊 13 استراتيجيات | 22+ مؤشر | XAU/USD فقط\n"
-            "⚡ 3 أنواع صفقات: سريع / متوسط / بعيد\n\n"
-            "الأوامر المتاحة:\n"
-            "/help - المساعدة\n"
-            "/status - حالة البوت\n"
-            "/scan - مسح فوري للسوق\n"
-            "/analysis - تحليل السوق\n"
-            "/summary - ملخص الإشارات\n"
-            "/performance - تقرير الأداء\n"
-            "/calendar - الأحداث الاقتصادية\n"
-            "/confluence - تحليل التطابق"
-        )
-
-    async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """أمر /help"""
-        if not await self._check_admin(update):
-            return
-        await update.message.reply_text(
-            "📋 **مساعدة BBPro Signal Bot**\n\n"
-            "الأوامر:\n"
-            "/start - بدء البوت\n"
-            "/status - حالة البوت والإعدادات\n"
-            "/scan - مسح فوري للسوق\n"
-            "/analysis - تحليل شامل للسوق\n"
-            "/summary - ملخص إشارات اليوم\n\n"
-            "الاستراتيجيات:\n"
-            "• Trend Following\n"
-            "• Mean Reversion\n"
-            "• Momentum\n"
-            "• Breakout\n"
-            "• Scalping\n"
-            "• Swing\n"
-            "• Supertrend\n"
-            "• Multi-Confluence\n\n"
-            "أنواع الصفقات:\n"
-            "⚡ سريع (Scalping) - 1-3 دقائق\n"
-            "📊 متوسط (Medium) - ساعة لعدة ساعات\n"
-            "🎯 بعيد (Swing) - أيام لأسابيع"
-        )
-
-    async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """أمر /status"""
-        if not await self._check_admin(update):
-            return
-        status = (
-            "📊 **حالة BBPro Signal Bot**\n\n"
-            "الرمز: XAU/USD (الذهب)\n"
-            f"الأزواج: {len(TRADING_PAIRS)}\n"
-            f"الاستراتيجيات: 8\n"
-            f"المؤشرات: 17+\n"
-            f"القناة العامة: {'✅' if PUBLIC_CHANNEL_ID else '❌'}\n"
-            f"القناة الخاصة: {'✅' if PRIVATE_CHANNEL_ID else '❌'}\n\n"
-            f"إشارات اليوم: {len(self.signal_history)}\n"
-            f"الحالة: 🟢 يعمل"
-        )
-        await update.message.reply_text(status)
-
-    async def cmd_scan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """أمر /scan - مسح فوري"""
-        if not await self._check_admin(update):
-            return
-        await update.message.reply_text("🔄 جاري مسح السوق... قد يستغرق دقيقة")
-        logger.info(f"Manual scan requested by {update.effective_user.id}")
-        signals = self.scan_market("ALL")
-        if signals:
-            await self.process_signals(signals)
-            await update.message.reply_text(f"✅ تم العثور على {len(signals)} إشارة!")
-        else:
-            await update.message.reply_text("⚠️ لا توجد إشارات في الوقت الحالي")
-
-    async def cmd_analysis(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """أمر /analysis"""
-        if not await self._check_admin(update):
-            return
-        await update.message.reply_text("📊 جاري تحليل السوق...")
-        await self.send_market_analysis()
-
-    async def cmd_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """أمر /summary"""
-        if not await self._check_admin(update):
-            return
-        if not self.signal_history:
-            await update.message.reply_text("⚠️ لا توجد إشارات اليوم بعد")
-            return
-        message = format_summary_message(self.signal_history)
-        await update.message.reply_text(message, parse_mode='HTML')
-
-    async def cmd_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """أمر /performance - تقرير الأداء"""
-        if not await self._check_admin(update):
-            return
-        report = self.tracker.get_performance_report(days=7)
-        await update.message.reply_text(report)
-
-    async def cmd_calendar(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """أمر /calendar - الأحداث الاقتصادية"""
-        if not await self._check_admin(update):
-            return
-        events = self.calendar.get_upcoming_events(hours_ahead=48)
-        msg = self.calendar.format_events_message(events)
-        await update.message.reply_text(msg)
-
-    async def cmd_confluence(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """أمر /confluence - تحليل التطابق"""
-        if not await self._check_admin(update):
-            return
-        await update.message.reply_text("📊 جاري تحليل التطابق...")
-        data = self.confluence.analyze_confluence()
-        msg = self.confluence.format_confluence_report(data)
-        await update.message.reply_text(msg)
-
-    # ═══════════════════════════════════════════════════════════
-    # Scheduler — FIXED: uses asyncio.create_task instead of new event loop
+    # Scheduler
     # ═══════════════════════════════════════════════════════════
 
     def _schedule_async(self, coro_func):
-        """يضيف coroutine task للـ event loop النشط (بلا ما يفتح loop جديد)"""
+        """يضيف coroutine task للـ event loop النشط"""
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -462,7 +1068,6 @@ class BBProSignalBot:
             else:
                 loop.run_until_complete(coro_func())
         except RuntimeError:
-            # لو مفيش loop نشط، نفتح واحد
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
@@ -514,7 +1119,6 @@ class BBProSignalBot:
 
     def run(self):
         """نقطة التشغيل الرئيسية"""
-        # Validate config
         if not BOT_TOKEN:
             logger.error("BOT_TOKEN not set! Check .env file")
             sys.exit(1)
@@ -526,11 +1130,12 @@ class BBProSignalBot:
         logger.info("=" * 60)
         logger.info("🚀 BBPro Signal Bot Starting...")
         logger.info("📊 Symbol: XAU/USD (Gold)")
-        logger.info(f"💱 Pair: XAU/USD (Gold)")
         logger.info(f"📈 Strategies: 13")
         logger.info(f"📏 Indicators: 22+")
-        logger.info(f"📡 Public Channel: {'✅' if PUBLIC_CHANNEL_ID else '❌'}")
-        logger.info(f"📡 Private Channel: {'✅' if PRIVATE_CHANNEL_ID else '❌'}")
+        logger.info(f"📡 Public Channel: {'✅' if self.public_channel else '❌'}")
+        logger.info(f"📡 Private Channel: {'✅' if self.private_channel else '❌'}")
+        logger.info(f"🤖 Auto-Trade: {'✅' if self.auto_trader.owner_client else '❌'}")
+        logger.info(f"👥 Users: {self.user_manager.get_stats()['total']}")
         logger.info("=" * 60)
 
         # Setup schedules
@@ -544,7 +1149,9 @@ class BBProSignalBot:
         # Setup Telegram commands
         app = Application.builder().token(BOT_TOKEN).build()
         self._app = app
+        self.bot = app.bot
 
+        # Command handlers
         app.add_handler(CommandHandler("start", self.cmd_start))
         app.add_handler(CommandHandler("help", self.cmd_help))
         app.add_handler(CommandHandler("status", self.cmd_status))
@@ -555,9 +1162,14 @@ class BBProSignalBot:
         app.add_handler(CommandHandler("calendar", self.cmd_calendar))
         app.add_handler(CommandHandler("confluence", self.cmd_confluence))
 
-        # Run scheduler in background — داخل الـ event loop النشط
+        # Callback query handler (الأزرار)
+        app.add_handler(CallbackQueryHandler(self.handle_callback))
+
+        # Text message handler (للتسجيل)
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_message))
+
+        # Run scheduler in background
         async def run_scheduler(app):
-            # أول scan فوري بعد 30 ثانية من الإطلاق
             logger.info("⏱️ Initial scan in 30 seconds...")
             await asyncio.sleep(30)
             logger.info("🔄 Running initial scalping scan...")
@@ -565,19 +1177,22 @@ class BBProSignalBot:
             logger.info("🔄 Running initial medium scan...")
             await self.run_medium_scan()
 
-            # بعدها الجدولة العادية
             while True:
                 schedule.run_pending()
                 await asyncio.sleep(30)
 
         async def post_init(app):
             await self.bot.send_message(
-                chat_id=PRIVATE_CHANNEL_ID or PUBLIC_CHANNEL_ID,
-                text="🤖 BBPro Signal Bot بدأ العمل!\n\n"
-                     "✅ جميع الأنظمة جاهزة\n"
-                     "📊 13 استراتيجيات | 22+ مؤشر | XAU/USD فقط\n"
-                     "⏱️ المسح التلقائي مفعّل\n"
-                     "🔄 أول مسح بعد 30 ثانية"
+                chat_id=self.private_channel or self.public_channel,
+                text=(
+                    "🤖 BBPro Signal Bot بدأ العمل!\n\n"
+                    "✅ جميع الأنظمة جاهزة\n"
+                    "📊 13 استراتيجيات | 22+ مؤشر | XAU/USD فقط\n"
+                    f"🤖 Auto-Trade: {'✅ مفعل' if self.auto_trader.owner_client else '❌ غير مفعل'}\n"
+                    f"👥 المسجلين: {self.user_manager.get_stats()['total']}\n"
+                    "⏱️ المسح التلقائي مفعّل\n"
+                    "🔄 أول مسح بعد 30 ثانية"
+                )
             )
             asyncio.create_task(run_scheduler(app))
 
