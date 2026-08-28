@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Configuration
+صياد الشمعات | Candle Hunter - Configuration
 إعدادات البوت الرئيسية - مخصص لـ XAU/USD (الذهب)
 """
 import os

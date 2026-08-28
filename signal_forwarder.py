@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Signal Forwarder
+صياد الشمعات | Candle Hunter - Signal Forwarder
 يبعت الإشارات لبوت التداول التلقائي عبر HTTP API
 """
 import logging

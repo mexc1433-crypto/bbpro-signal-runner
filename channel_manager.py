@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Channel Manager
+صياد الشمعات | Candle Hunter - Channel Manager
 إدارة توزيع الإشارات على القنوات
 """
 from typing import Dict, List, Optional

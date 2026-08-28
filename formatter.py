@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Message Formatter
+صياد الشمعات | Candle Hunter - Message Formatter
 تنسيق الرسائل للقنوات - مبسط وواضح
 """
 from typing import Dict, List, Optional
@@ -88,7 +88,7 @@ def format_signal_message(signal: Dict, capital_plans: List[Dict],
         msg += f"📅 {signal.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M'))}\n"
         msg += "━━━━━━━━━━━━━━━━\n"
         msg += "⚠️ ليست نصيحة استثمارية\n"
-        msg += "🤖 BBPro Signal"
+        msg += "🤖 صياد الشمعات | Candle Hunter"
 
         return msg
 
@@ -136,7 +136,7 @@ def format_signal_message(signal: Dict, capital_plans: List[Dict],
         msg += f"\n📅 {signal.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M'))}\n"
         msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         msg += "⚠️ ليست نصيحة استثمارية\n"
-        msg += "🤖 BBPro Signal 🔥"
+        msg += "🤖 صياد الشمعات | Candle Hunter"
 
         return msg
 
@@ -174,7 +174,7 @@ def format_analysis_message(analysis: Dict) -> str:
         msg += f"\n💡 {analysis['recommendation']}\n"
 
     msg += f"\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-    msg += "🤖 BBPro Signal"
+    msg += "🤖 صياد الشمعات | Candle Hunter"
 
     return msg
 
@@ -218,7 +218,7 @@ def format_summary_message(signals: List[Dict]) -> str:
     msg += f"  💎 خاصة: {private_count}\n"
 
     msg += f"\n📅 {datetime.now().strftime('%Y-%m-%d')}\n"
-    msg += "🤖 BBPro Signal"
+    msg += "🤖 صياد الشمعات | Candle Hunter"
 
     return msg
 
@@ -240,6 +240,6 @@ def format_market_update(market_data: Dict) -> str:
         msg += f"💵 DXY: {market_data['dxy']:.2f}\n"
 
     msg += f"\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-    msg += "🤖 BBPro Signal"
+    msg += "🤖 صياد الشمعات | Candle Hunter"
 
     return msg

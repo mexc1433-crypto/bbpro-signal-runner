@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Main Entry Point
+صياد الشمعات | Candle Hunter - Main Entry Point
 نقطة التشغيل الرئيسية
 """
 import subprocess
@@ -72,14 +72,14 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-logger = logging.getLogger("BBProBot")
+logger = logging.getLogger("CandleHunterBot")
 
 # Reduce noisy loggers
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
 
 
-class BBProSignalBot:
+class CandleHunterSignalBot:
     """البوت الرئيسي"""
 
     # مراحل التسجيل
@@ -342,7 +342,7 @@ class BBProSignalBot:
         msg += f"📋 الاستراتيجية: {signal.get('strategy_name', '')}\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
         msg += f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-        msg += "🤖 BBPro Signal"
+        msg += "🤖 صياد الشمعات | Candle Hunter"
         return msg
 
     async def send_signal_to_channel(self, signal: Dict, capital_plans: List[Dict],
@@ -388,7 +388,7 @@ class BBProSignalBot:
         # لو أدمن — اعرض القائمة الكاملة
         if is_admin:
             welcome = (
-                "🤖 **BBPro Signal Bot — وضع الأدمن**\n\n"
+                "🤖 **صياد الشمعات | Candle Hunter — وضع الأدمن**\n\n"
                 "📊 13 استراتيجية | 22+ مؤشر | XAU/USD فقط\n"
                 "🤖 تنفيذ تلقائي على MEXC\n"
                 "👥 نظام إحالات + أعضاء\n\n"
@@ -409,7 +409,7 @@ class BBProSignalBot:
 
             welcome = (
                 f"أهلاً {user.first_name}! 👋\n\n"
-                "🤖 BBPro Signal Bot\n"
+                "🤖 صياد الشمعات | Candle Hunter\n"
                 "📊 توصيات ذهب (XAU/USD) + تنفيذ تلقائي\n\n"
                 "اختر من القائمة:"
             )
@@ -422,7 +422,7 @@ class BBProSignalBot:
         # لو مستخدم جديد غير مسجل — اعرض شاشة التسجيل
         ref_link = self.user_manager.get_referral_link(self.mexc_referral_code)
         welcome = (
-            "🤖 أهلاً بك في BBPro Signal Bot!\n\n"
+            "🤖 أهلاً بك في صياد الشمعات | Candle Hunter!\n\n"
             "📊 بوت توصيات الذهب (XAU/USD)\n"
             "🤖 تنفيذ تلقائي على MEXC\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
@@ -447,7 +447,7 @@ class BBProSignalBot:
         is_admin = self._is_admin(user_id)
 
         help_text = (
-            "📋 **مساعدة BBPro Signal Bot**\n\n"
+            "📋 **مساعدة صياد الشمعات | Candle Hunter**\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "📊 **التوصيات:**\n"
             "• مسح السوق الفوري\n"
@@ -488,7 +488,7 @@ class BBProSignalBot:
 
         # حالة البوت
         status = (
-            "📊 **حالة BBPro Signal Bot**\n\n"
+            "📊 **حالة صياد الشمعات | Candle Hunter**\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "📊 الرمز: XAU/USD (الذهب)\n"
             f"📈 الاستراتيجيات: 13\n"
@@ -720,12 +720,12 @@ class BBProSignalBot:
         if data == "main_menu":
             if is_admin:
                 await query.edit_message_text(
-                    "🤖 BBPro Signal Bot — القائمة الرئيسية",
+                    "🤖 صياد الشمعات | Candle Hunter — القائمة الرئيسية",
                     reply_markup=self._get_main_menu(is_admin=True)
                 )
             elif self.user_manager.is_registered(user_id):
                 await query.edit_message_text(
-                    "🤖 BBPro Signal Bot — القائمة الرئيسية",
+                    "🤖 صياد الشمعات | Candle Hunter — القائمة الرئيسية",
                     reply_markup=self._get_main_menu(is_admin=False)
                 )
             else:
@@ -1141,7 +1141,7 @@ class BBProSignalBot:
             sys.exit(1)
 
         logger.info("=" * 60)
-        logger.info("🚀 BBPro Signal Bot Starting...")
+        logger.info("🚀 صياد الشمعات | Candle Hunter Starting...")
         logger.info("📊 Symbol: XAU/USD (Gold)")
         logger.info(f"📈 Strategies: 13")
         logger.info(f"📏 Indicators: 22+")
@@ -1198,7 +1198,7 @@ class BBProSignalBot:
             await self.bot.send_message(
                 chat_id=self.private_channel or self.public_channel,
                 text=(
-                    "🤖 BBPro Signal Bot بدأ العمل!\n\n"
+                    "🤖 صياد الشمعات | Candle Hunter بدأ العمل!\n\n"
                     "✅ جميع الأنظمة جاهزة\n"
                     "📊 13 استراتيجيات | 22+ مؤشر | XAU/USD فقط\n"
                     f"🤖 Auto-Trade: {'✅ مفعل' if self.auto_trader.owner_client else '❌ غير مفعل'}\n"
@@ -1216,5 +1216,5 @@ class BBProSignalBot:
 
 
 if __name__ == '__main__':
-    bot = BBProSignalBot()
+    bot = CandleHunterSignalBot()
     bot.run()
