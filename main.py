@@ -2,6 +2,26 @@
 BBPro Signal Bot - Main Entry Point
 نقطة التشغيل الرئيسية
 """
+import subprocess
+import sys
+
+# Runtime install of missing packages (bypass Docker build cache)
+def _ensure_packages():
+    missing = []
+    try:
+        import ccxt
+    except ImportError:
+        missing.append("ccxt==4.5.75")
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        missing.append("cryptography>=42.0.0")
+    if missing:
+        print(f"Installing missing packages: {missing}")
+        subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing)
+
+_ensure_packages()
+
 import asyncio
 import logging
 import schedule
