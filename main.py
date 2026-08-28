@@ -369,7 +369,7 @@ class BBProSignalBot:
                 text=message,
                 parse_mode='HTML'
             )
-            logger.info(f"Signal sent to {channel_type} channel: {signal['symbol']}")
+            logger.info(f"Signal sent to {channel_type} channel: {signal.get('symbol', 'XAU/USD')}")
 
             # تتبع الإشارة في القناة الخاصة فقط
             if channel_type == "PRIVATE":
