@@ -89,7 +89,7 @@ class BBProSignalBot:
     def __init__(self):
         self.bot: Optional[Bot] = None
         self.fetcher = MarketDataFetcher()
-        self.risk_manager = RiskManager(CAPITAL_TIERS, CAPITAL_TIER_CONFIG)
+        self.risk_manager = RiskManager()
         self.channel_manager = ChannelManager(CHANNEL_RULES)
         self.analyzer = MarketAnalyzer(self.fetcher)
         self.tracker = SignalTracker()
