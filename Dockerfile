@@ -5,10 +5,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt .
-# Force fresh pip install (no Docker layer cache)
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Install ALL deps directly (bypass layer cache issues)
+RUN pip install --no-cache-dir \
+    python-telegram-bot==20.7 \
+    yfinance==0.2.40 \
+    pandas==2.2.0 \
+    numpy==1.26.4 \
+    ta==0.11.0 \
+    python-dotenv==1.0.1 \
+    schedule==1.2.1 \
+    requests==2.31.0 \
+    aiohttp==3.9.3 \
+    ccxt==4.5.75 \
+    "cryptography>=42.0.0"
 
 COPY . .
 
