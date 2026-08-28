@@ -61,6 +61,7 @@ from economic_calendar import EconomicCalendar
 from confluence import ConfluenceAnalyzer
 from user_manager import UserManager, Encryption
 from auto_trader import AutoTrader
+from signal_forwarder import SignalForwarder
 from mexc_client import MexcClient
 
 # ═══════════════════════════════════════════════════════════════
@@ -100,6 +101,7 @@ class BBProSignalBot:
         # Auto-trader (سيتم تهيئته بعد قراءة env vars)
         owner_api_key = os.getenv("MEXC_API_KEY", "")
         owner_api_secret = os.getenv("MEXC_API_SECRET", "")
+        self.forwarder = SignalForwarder()
         self.auto_trader = AutoTrader(self.user_manager, owner_api_key, owner_api_secret)
 
         self.strategies = ALL_STRATEGIES
@@ -315,25 +317,16 @@ class BBProSignalBot:
                 except Exception as e:
                     logger.error(f"Error sending to {channel}: {e}")
 
-        # 🤖 تنفيذ تلقائي على كل الحسابات
+        # 📡 إرسال الإشارة لبوت التداول التلقائي (عبر HTTP API)
         if signals:
             try:
-                exec_results = await self.auto_trader.execute_for_everyone(signals[0])
-                if exec_results["total_executed"] > 0 or exec_results["total_failed"] > 0:
-                    report = self.auto_trader.format_execution_report(exec_results)
-                    # إرسال تقرير للأدمن
-                    if self.private_channel:
-                        await self.bot.send_message(chat_id=self.private_channel, text=report)
-                    # إشعار المستخدمين
-                    pending = self.auto_trader.get_pending_notifications()
-                    for tg_id, notif in pending.items():
-                        try:
-                            msg = self._format_user_notification(notif["signal"], notif["result"])
-                            await self.bot.send_message(chat_id=tg_id, text=msg)
-                        except Exception as e:
-                            logger.warning(f"Failed to notify user {tg_id}: {e}")
+                forward_result = await self.forwarder.forward_signal(signals[0])
+                if forward_result.get("success"):
+                    logger.info(f"📡 Signal forwarded to trade bot successfully")
+                else:
+                    logger.warning(f"⚠️ Forward failed: {forward_result.get('error', 'unknown')}")
             except Exception as e:
-                logger.error(f"Auto-trade execution error: {e}")
+                logger.error(f"Signal forward error: {e}")
 
     def _format_user_notification(self, signal: Dict, result: Dict) -> str:
         """إشعار المستخدم بتنفيذ صفقة على حسابه"""
