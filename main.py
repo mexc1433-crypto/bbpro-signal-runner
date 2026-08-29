@@ -209,7 +209,7 @@ class CandleHunterSignalBot:
     # Market Scanning
     # ═══════════════════════════════════════════════════════════
 
-    def scan_market(self, trade_type: str = "ALL") -> List[Dict]:
+    async def scan_market(self, trade_type: str = "ALL") -> List[Dict]:
         """يمسح السوق بالكامل ويولّد الإشارات"""
         all_signals = []
 
@@ -648,7 +648,7 @@ class CandleHunterSignalBot:
             return
 
         await update.message.reply_text("🔄 جاري مسح السوق... قد يستغرق دقيقة")
-        signals = self.scan_market("ALL")
+        signals = await self.scan_market("ALL")
         if signals:
             await self.process_signals(signals)
             await update.message.reply_text(f"✅ تم العثور على {len(signals)} إشارة!")
@@ -913,7 +913,7 @@ class CandleHunterSignalBot:
         # ===== أوامر السوق =====
         elif data == "scan":
             await query.edit_message_text("🔄 جاري مسح السوق...")
-            signals = self.scan_market("ALL")
+            signals = await self.scan_market("ALL")
             if signals:
                 await self.process_signals(signals)
                 await query.edit_message_text(
@@ -1174,21 +1174,21 @@ class CandleHunterSignalBot:
 
     async def run_scalping_scan(self):
         logger.info("🔄 Starting SCALPING scan...")
-        signals = self.scan_market("SCALPING")
+        signals = await self.scan_market("SCALPING")
         if signals:
             await self.process_signals(signals)
         logger.info(f"Scalping scan complete: {len(signals)} signals found")
 
     async def run_medium_scan(self):
         logger.info("🔄 Starting MEDIUM scan...")
-        signals = self.scan_market("MEDIUM")
+        signals = await self.scan_market("MEDIUM")
         if signals:
             await self.process_signals(signals)
         logger.info(f"Medium scan complete: {len(signals)} signals found")
 
     async def run_swing_scan(self):
         logger.info("🔄 Starting SWING scan...")
-        signals = self.scan_market("SWING")
+        signals = await self.scan_market("SWING")
         if signals:
             await self.process_signals(signals)
         logger.info(f"Swing scan complete: {len(signals)} signals found")
