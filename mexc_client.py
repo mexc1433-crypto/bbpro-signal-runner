@@ -315,3 +315,48 @@ class MexcClient:
             return {"valid": False, "error": "API Keys ليس لها صلاحية التداول"}
         except Exception as e:
             return {"valid": False, "error": str(e)}
+
+    # ===== OCO (One-Cancels-Other) =====
+
+    def cancel_open_orders(self, symbol: str = None) -> Dict:
+        """إلغاء كل الأوامر المعلقة لزوج معين"""
+        try:
+            target = symbol or self.GOLD_SYMBOL
+            self.exchange.cancel_all_orders(target)
+            logger.info(f"✅ Cancelled all orders for {target}")
+            return {"success": True, "message": f"Cancelled all orders for {target}"}
+        except Exception as e:
+            logger.error(f"Error cancelling orders: {e}")
+            return {"success": False, "error": str(e)}
+
+    def oco_on_tp_hit(self, position_side: str, amount: float) -> Dict:
+        """لما TP يضرب — الفي TP orders تلقائياً تلغي الـ SL orders"""
+        try:
+            # إلغاء كل أوامر SL المعلقة
+            self.cancel_open_orders()
+            logger.info(f"✅ OCO: TP hit — cancelled all SL orders (side={position_side})")
+            return {"success": True, "action": "TP_HIT", "message": "Cancelled SL orders after TP"}
+        except Exception as e:
+            logger.error(f"OCO TP error: {e}")
+            return {"success": False, "error": str(e)}
+
+    def oco_on_sl_hit(self, position_side: str, amount: float) -> Dict:
+        """لما SL يضرب — الفي TP orders تلقائياً تلغي"""
+        try:
+            # إلغاء كل أوامر TP المعلقة
+            self.cancel_open_orders()
+            logger.info(f"✅ OCO: SL hit — cancelled all TP orders (side={position_side})")
+            return {"success": True, "action": "SL_HIT", "message": "Cancelled TP orders after SL"}
+        except Exception as e:
+            logger.error(f"OCO SL error: {e}")
+            return {"success": False, "error": str(e)}
+
+    def get_open_orders(self, symbol: str = None) -> List[Dict]:
+        """جلب الأوامر المعلقة"""
+        try:
+            target = symbol or self.GOLD_SYMBOL
+            orders = self.exchange.fetch_open_orders(target)
+            return orders
+        except Exception as e:
+            logger.error(f"Error fetching open orders: {e}")
+            return []

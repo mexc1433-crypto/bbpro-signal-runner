@@ -61,7 +61,8 @@ from chart_generator import generate_signal_chart
 from economic_calendar import EconomicCalendar
 from confluence import ConfluenceAnalyzer
 from enhanced_confluence import EnhancedConfluence
-from signal_filters import VolatilityFilter, ActiveHoursFilter
+from signal_filters import VolatilityFilter, ActiveHoursFilter, TrendFilter
+from price_alerts import PriceAlertManager
 from user_manager import UserManager, Encryption
 from auto_trader import AutoTrader
 from signal_forwarder import SignalForwarder
@@ -102,6 +103,9 @@ class CandleHunterSignalBot:
         self.enhanced_confluence = EnhancedConfluence(self.fetcher)
         self.volatility_filter = VolatilityFilter()
         self.active_hours_filter = ActiveHoursFilter()
+        self.trend_filter = TrendFilter(self.fetcher)
+        self.price_alerts = PriceAlertManager()
+        self.broadcast_state = {}  # for broadcast feature
         self.user_manager = UserManager()
 
         # Auto-trader (سيتم تهيئته بعد قراءة env vars)
@@ -143,12 +147,13 @@ class CandleHunterSignalBot:
         buttons = [
             [InlineKeyboardButton("📡 مسح السوق", callback_data="scan"),
              InlineKeyboardButton("📊 حالة السوق", callback_data="status")],
-            [InlineKeyboardButton("🔍 تحليل السوق", callback_data="analysis"),
-             InlineKeyboardButton("📈 ملخص اليوم", callback_data="summary")],
-            [InlineKeyboardButton("🎯 تحليل التطابق", callback_data="confluence"),
-             InlineKeyboardButton("🔬 تحليل 20 مؤشر", callback_data="scan_pro")],
+            [InlineKeyboardButton("📈 ملخص اليوم", callback_data="summary"),
+             InlineKeyboardButton("🎯 تحليل التطابق", callback_data="confluence")],
+            [InlineKeyboardButton("🔬 تحليل 20 مؤشر", callback_data="scan_pro")],
             [InlineKeyboardButton("📈 الإحصائيات", callback_data="stats"),
-             InlineKeyboardButton("📅 الأحداث الاقتصادية", callback_data="calendar")],
+             InlineKeyboardButton("🔔 تنبيه سعر", callback_data="price_alerts")],
+            [InlineKeyboardButton("📅 الأحداث الاقتصادية", callback_data="calendar"),
+             InlineKeyboardButton("🔍 تحليل السوق", callback_data="analysis")],
         ]
 
         # أزرار المستخدم
@@ -190,7 +195,8 @@ class CandleHunterSignalBot:
             [InlineKeyboardButton("🤖 تقرير Auto-Trade", callback_data="admin_auto"),
              InlineKeyboardButton("💰 رصيد MEXC", callback_data="admin_balance")],
             [InlineKeyboardButton("🔒 إغلاق كل الصفقات", callback_data="admin_closeall"),
-             InlineKeyboardButton("📋 تقرير الأداء", callback_data="admin_performance")],
+             InlineKeyboardButton("📢 رسالة جماعية", callback_data="admin_broadcast")],
+            [InlineKeyboardButton("📋 تقرير الأداء", callback_data="admin_performance")],
             [InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")],
         ]
         return InlineKeyboardMarkup(buttons)
@@ -234,6 +240,22 @@ class CandleHunterSignalBot:
                     except Exception as e:
                         logger.warning(f"Failed to send close notification: {e}")
                 self.tracker.cleanup_old_signals(30)
+
+                # 🔔 FEATURE 7: Check Price Alerts
+                triggered_alerts = self.price_alerts.check_alerts(ticker["last"])
+                for alert in triggered_alerts:
+                    try:
+                        dir_emoji = "⬆️" if alert["direction"] == "ABOVE" else "⬇️"
+                        dir_ar = "فوق" if alert["direction"] == "ABOVE" else "تحت"
+                        await self.bot.send_message(
+                            chat_id=alert["telegram_id"],
+                            text=f"🔔 تنبيه سعر!\n\n"
+                                 f"{dir_emoji} الذهب وصل ${ticker['last']:,.2f}\n"
+                                 f"التنبيه: {dir_ar} ${alert['target_price']:,.2f}\n\n"
+                                 f"🤖 صياد الشمعات | Candle Hunter",
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to send price alert: {e}")
         except Exception as e:
             logger.warning(f"Signal tracking check failed: {e}")
 
@@ -326,6 +348,12 @@ class CandleHunterSignalBot:
 
                                 # ⏰ FEATURE 5: Active Hours Filter
                                 signal = self.active_hours_filter.apply(signal)
+
+                                # 📈 FEATURE 12: Trend-Only Filter — منع الإشارات عكس الترند
+                                trend_result = self.trend_filter.check_signal(signal)
+                                if not trend_result["ok"]:
+                                    logger.info(f"🚫 Trend filter: {trend_result['reason']}")
+                                    continue
 
                                 all_signals.append(signal)
                         except Exception as e:
@@ -1110,6 +1138,39 @@ class CandleHunterSignalBot:
                 await query.edit_message_text(report[:4096])
             else:
                 await query.edit_message_text(report)
+
+        elif data == "price_alerts":
+            alerts_msg = self.price_alerts.format_user_alerts(user_id)
+            keyboard = [
+                [InlineKeyboardButton("🔔 تنبيه سعر جديد", callback_data="alert_new")],
+                [InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")],
+            ]
+            await query.edit_message_text(
+                alerts_msg,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
+        elif data == "alert_new":
+            await query.edit_message_text(
+                "🔔 تنبيه سعر جديد\n\n"
+                "اكتب السعر المستهدف بهذا الشكل:\n"
+                "alert 4500 above\n"
+                "أو\n"
+                "alert 4450 below\n\n"
+                "⬆️ above = تنبيه لما السعر يفوق الرقم\n"
+                "⬇️ below = تنبيه لما السعر ينزل تحت الرقم"
+            )
+
+        elif data == "admin_broadcast":
+            if user_id != self.admin_id:
+                await query.edit_message_text("❌ غير مصرح")
+                return
+            await query.edit_message_text(
+                "📢 رسالة جماعية\n\n"
+                "اكتب رسالتك بهذا الشكل:\n"
+                "broadcast رسالتك هنا\n\n"
+                f"👥 سيتم الإرسال لـ {len(self.user_manager.get_all_telegram_ids())} مستخدم"
+            )
 
         elif data == "calendar":
             events = self.calendar.get_upcoming_events(hours_ahead=48)

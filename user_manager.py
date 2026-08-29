@@ -176,6 +176,10 @@ class UserManager:
         """جلب كل المستخدمين"""
         return list(self.users.values())
 
+    def get_all_telegram_ids(self) -> List[int]:
+        """جلب كل Telegram IDs — للرسائل الجماعية"""
+        return [int(uid) for uid in self.users.keys() if self.users[uid].get("status") != "BANNED"]
+
     def get_stats(self) -> Dict:
         """إحصائيات المستخدمين"""
         all_users = list(self.users.values())

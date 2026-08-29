@@ -91,6 +91,12 @@ def format_signal_message(signal: Dict, capital_plans: List[Dict],
     if signal.get("confluence_boost"):
         msg += f"🔬 تطابق: +{signal['confluence_boost']}% ({signal.get('confluence_agreement', 0):.0f}% توافق)\n"
 
+    # Trend badge
+    if signal.get("trend"):
+        trend_emoji = "📈" if signal["trend"] == "BULLISH" else "📉" if signal["trend"] == "BEARISH" else "↔️"
+        aligned = "✅ مع الترند" if signal.get("trend_aligned") else "⚠️ ترند محايد"
+        msg += f"{trend_emoji} الترند: {signal['trend']} — {aligned}\n"
+
     msg += "\n"
     msg += f"📅 {signal.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M'))}\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"

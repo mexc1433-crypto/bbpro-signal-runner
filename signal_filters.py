@@ -137,3 +137,71 @@ class ActiveHoursFilter:
         )
 
         return signal
+
+
+class TrendFilter:
+    """فلتر اتجاه TREND فقط — يمنع الإشارات عكس الترند العام"""
+
+    def __init__(self, fetcher):
+        self.fetcher = fetcher
+
+    def get_higher_tf_trend(self) -> Dict:
+        """يحدد الترند العام على فريم 4H و 1D"""
+        trends = {}
+        for tf in ["4h", "1d"]:
+            try:
+                df = self.fetcher.fetch_candles("XAU/USD", tf, limit=100)
+                if df.empty or len(df) < 50:
+                    continue
+
+                # EMA50 + EMA200 للترند العام
+                from indicators import ema
+                ema50 = ema(df, 50).iloc[-1]
+                ema200 = ema(df, 200).iloc[-1] if len(df) >= 200 else ema(df, min(len(df)-1, 50)).iloc[-1]
+                price = df['close'].iloc[-1]
+
+                if price > ema50 > ema200:
+                    trends[tf] = "BULLISH"
+                elif price < ema50 < ema200:
+                    trends[tf] = "BEARISH"
+                else:
+                    trends[tf] = "NEUTRAL"
+
+            except Exception as e:
+                logger.warning(f"TrendFilter error on {tf}: {e}")
+                trends[tf] = "UNKNOWN"
+
+        # الترند النهائي = agreement بين 4H و 1D
+        if trends.get("4h") == trends.get("1d") and trends.get("4h") != "NEUTRAL":
+            return {"trend": trends["4h"], "agreement": True, "details": trends}
+        elif trends.get("4h") == "NEUTRAL" or trends.get("1d") == "NEUTRAL":
+            return {"trend": "NEUTRAL", "agreement": False, "details": trends}
+        else:
+            return {"trend": "MIXED", "agreement": False, "details": trends}
+
+    def check_signal(self, signal: Dict) -> Dict:
+        """يفحص هل الإشارة مع الترند ولا ضده"""
+        trend_data = self.get_higher_tf_trend()
+        trend = trend_data["trend"]
+        signal_dir = signal.get("signal_type", "")
+
+        # لو الترند محايد أو مكسود — اسمح بكل الإشارات بس قلل الثقة
+        if trend == "NEUTRAL" or trend == "MIXED" or trend == "UNKNOWN":
+            signal["trend_aligned"] = False
+            signal["trend"] = trend
+            signal["confidence"] = max(30, signal.get("confidence", 50) - 5)
+            return {"ok": True, "reason": f"ترند {trend} — ثقة مخفضة", "trend": trend}
+
+        # لو الإشارة مع الترند — زود الثقة
+        if (trend == "BULLISH" and signal_dir == "BUY") or (trend == "BEARISH" and signal_dir == "SELL"):
+            signal["trend_aligned"] = True
+            signal["trend"] = trend
+            signal["confidence"] = min(95, signal.get("confidence", 50) + 8)
+            logger.info(f"📈 Trend aligned: {signal_dir} in {trend} trend → +8% confidence")
+            return {"ok": True, "reason": f"مع الترند {trend}", "trend": trend}
+
+        # لو الإشارة عكس الترند — ارفضها
+        signal["trend_aligned"] = False
+        signal["trend"] = trend
+        logger.info(f"🚫 Against trend: {signal_dir} in {trend} trend — REJECTED")
+        return {"ok": False, "reason": f"عكس الترند {trend}", "trend": trend}
