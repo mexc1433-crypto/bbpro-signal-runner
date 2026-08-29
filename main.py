@@ -57,6 +57,7 @@ from formatter import (
 )
 from analysis import MarketAnalyzer
 from signal_tracker import SignalTracker
+from chart_generator import generate_signal_chart
 from economic_calendar import EconomicCalendar
 from confluence import ConfluenceAnalyzer
 from user_manager import UserManager, Encryption
@@ -323,18 +324,31 @@ class CandleHunterSignalBot:
         return True
 
     def _is_duplicate_signal(self, signal: Dict) -> bool:
-        """منع التكرار: لو في توصية مفتوحة على نفس الاتجاه في آخر ساعة"""
+        """منع التكرار: لو في توصية مفتوحة على نفس الاتجاه أو نفس السعر خلال ساعتين"""
         signal_type = signal.get("signal_type", "")
+        entry_price = signal.get("entry_price", 0)
         now = datetime.now()
+
+        # 1. تحقق من الإشارات المعلقة (PENDING) في tracker — لو في صفقة لسه مفتوحة نفس الاتجاه
+        for sig in self.tracker.signals:
+            if sig.get("status") != "PENDING":
+                continue
+            if sig.get("signal_type") == signal_type:
+                logger.info(f"🚫 Duplicate: PENDING {signal_type} signal still open (id={sig['id']})")
+                return True
+
+        # 2. تحقق من signal_history — نفس الاتجاه خلال ساعتين
         for prev in self.signal_history:
-            # نفس الاتجاه؟
             if prev.get("signal_type") != signal_type:
                 continue
-            # في آخر ساعة؟
             try:
                 prev_time = datetime.strptime(prev.get("timestamp", ""), "%Y-%m-%d %H:%M")
-                if (now - prev_time).total_seconds() < 3600:
-                    logger.info(f"🚫 Duplicate: same direction ({signal_type}) signal within 1h")
+                if (now - prev_time).total_seconds() <= 7200:  # ساعتين بدل ساعة
+                    # لو نفس سعر الدخول بالظبط → نفس الإشارة
+                    if abs(prev.get("entry_price", 0) - entry_price) < 0.01:
+                        logger.info(f"🚫 Duplicate: exact same signal (entry={entry_price})")
+                        return True
+                    logger.info(f"🚫 Duplicate: same direction ({signal_type}) within 2h")
                     return True
             except:
                 continue
@@ -436,7 +450,7 @@ class CandleHunterSignalBot:
 
     async def send_signal_to_channel(self, signal: Dict, capital_plans: List[Dict],
                                        channel_type: str):
-        """يرسل إشارة لقناة محددة"""
+        """يرسل إشارة لقناة محددة — مع صورة تحليل لو الثقة عالية"""
         channel_id = self.private_channel if channel_type == "PRIVATE" else self.public_channel
 
         if not channel_id:
@@ -446,12 +460,35 @@ class CandleHunterSignalBot:
         message = format_signal_message(signal, capital_plans, channel_type)
 
         try:
-            await self.bot.send_message(
-                chat_id=channel_id,
-                text=message,
-                parse_mode='HTML'
-            )
-            logger.info(f"Signal sent to {channel_type} channel: {signal.get('symbol', 'XAU/USD')}")
+            # لو الثقة ≥ 75% — ولّد صورة المخطط
+            chart_path = None
+            if signal.get("confidence", 0) >= 75:
+                try:
+                    timeframe = signal.get("timeframe", "1h")
+                    df = self.fetcher.fetch_ohlcv("XAU/USD", timeframe, 100)
+                    if df is not None and not df.empty and len(df) >= 20:
+                        chart_path = generate_signal_chart(df, signal, "signal_chart.png")
+                        logger.info(f"📊 Chart generated for high-confidence signal ({signal['confidence']}%)")
+                except Exception as e:
+                    logger.warning(f"Chart generation failed: {e}")
+
+            # إرسال الصورة مع الرسالة لو موجودة
+            if chart_path and os.path.exists(chart_path):
+                with open(chart_path, 'rb') as photo:
+                    await self.bot.send_photo(
+                        chat_id=channel_id,
+                        photo=photo,
+                        caption=message,
+                        parse_mode='HTML'
+                    )
+                logger.info(f"Signal + chart sent to {channel_type} channel: {signal.get('symbol', 'XAU/USD')}")
+            else:
+                await self.bot.send_message(
+                    chat_id=channel_id,
+                    text=message,
+                    parse_mode='HTML'
+                )
+                logger.info(f"Signal sent to {channel_type} channel: {signal.get('symbol', 'XAU/USD')}")
 
             # تتبع الإشارة في القناة الخاصة فقط
             if channel_type == "PRIVATE":
