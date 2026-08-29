@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Signal Tracker
+صياد الشمعات | Candle Hunter - Signal Tracker
 تتبع إشارات التداول وتسجيل النجاح/الفشل
 """
 import json
@@ -194,7 +194,7 @@ class SignalTracker:
                 msg += f"{emoji} {name}: {s['wins']}W/{s['losses']}L ({rate:.0f}%)\n"
 
         msg += f"\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-        msg += "🤖 BBPro Signal"
+        msg += "🤖 صياد الشمعات | Candle Hunter"
 
         return msg
 

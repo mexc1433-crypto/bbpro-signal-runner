@@ -213,22 +213,46 @@ class CandleHunterSignalBot:
         """يمسح السوق بالكامل ويولّد الإشارات"""
         all_signals = []
 
-        # فحص الإشارات المعلقة + تحديث التتبع
+        # فحص الإشارات المعلقة + تحديث التتبع + إرسال رسالة الإغلاق
         try:
             ticker = self.fetcher.fetch_ticker("XAU/USD")
             if ticker and ticker.get("last"):
                 updated = self.tracker.check_pending_signals(ticker["last"])
                 for s in updated:
                     logger.info(f"📋 Signal {s['id']} → {s['result']} (exit={s['exit_price']})")
+                    # إرسال رسالة إغلاق الصفقة للقناة الخاصة
+                    try:
+                        await self._send_close_notification(s)
+                    except Exception as e:
+                        logger.warning(f"Failed to send close notification: {e}")
                 self.tracker.cleanup_old_signals(30)
         except Exception as e:
             logger.warning(f"Signal tracking check failed: {e}")
 
-        # إيقاف الإشارات وقت الأخبار عالية التأثير
+        # إيقاف الإشارات وقت الأخبار عالية التأثير (60 دقيقة قبل وبعد)
         try:
-            if self.calendar.is_high_impact_soon(30):
-                logger.warning("⚠️ High impact news soon - pausing signals")
+            if self.calendar.is_high_impact_soon(60):
+                logger.warning("⚠️ High impact news within 60 min - pausing signals")
+                # إرسال تنبيه للقناة الخاصة
+                try:
+                    upcoming = self.calendar.get_upcoming_events(hours_ahead=1)
+                    high_events = [e for e in upcoming if e.get("impact") == "High"]
+                    if high_events and not getattr(self, '_news_alert_sent', False):
+                        event = high_events[0]
+                        alert_msg = self.calendar.format_pre_alert(event)
+                        if self.private_channel:
+                            await self.bot.send_message(
+                                chat_id=self.private_channel,
+                                text=alert_msg,
+                                parse_mode='HTML'
+                            )
+                            self._news_alert_sent = True
+                            logger.info(f"📢 News alert sent: {event.get('title', '')}")
+                except Exception as e:
+                    logger.warning(f"News alert failed: {e}")
                 return all_signals
+            else:
+                self._news_alert_sent = False
         except Exception as e:
             logger.warning(f"Calendar check failed: {e}")
 
@@ -286,8 +310,56 @@ class CandleHunterSignalBot:
     # Signal Processing & Distribution
     # ═══════════════════════════════════════════════════════════
 
+    def _filter_distance(self, signal: Dict) -> bool:
+        """فلتر المسافة: لو الفرق بين الدخول والستوب أقل من 0.3% نتجاهل"""
+        entry = signal.get("entry_price", 0)
+        sl = signal.get("stop_loss", 0)
+        if entry <= 0 or sl <= 0:
+            return False
+        distance_pct = abs(entry - sl) / entry * 100
+        if distance_pct < 0.3:
+            logger.info(f"🚫 Filtered: distance too small ({distance_pct:.2f}%) - {signal.get('signal_type', '?')}")
+            return False
+        return True
+
+    def _is_duplicate_signal(self, signal: Dict) -> bool:
+        """منع التكرار: لو في توصية مفتوحة على نفس الاتجاه في آخر ساعة"""
+        signal_type = signal.get("signal_type", "")
+        now = datetime.now()
+        for prev in self.signal_history:
+            # نفس الاتجاه؟
+            if prev.get("signal_type") != signal_type:
+                continue
+            # في آخر ساعة؟
+            try:
+                prev_time = datetime.strptime(prev.get("timestamp", ""), "%Y-%m-%d %H:%M")
+                if (now - prev_time).total_seconds() < 3600:
+                    logger.info(f"🚫 Duplicate: same direction ({signal_type}) signal within 1h")
+                    return True
+            except:
+                continue
+        return False
+
+    def _confirm_signal(self, signal: Dict) -> bool:
+        """تأكيد الإشارة: شروط إضافية قبل الإرسال"""
+        confidence = signal.get("confidence", 0)
+        # حد أدنى للثقة 55%
+        if confidence < 55:
+            logger.info(f"🚫 Low confidence: {confidence}% < 55%")
+            return False
+        # R:R لا يقل عن 1:1
+        entry = signal.get("entry_price", 0)
+        tp2 = signal.get("take_profit_2", 0)
+        sl = signal.get("stop_loss", 0)
+        if entry > 0 and sl > 0 and tp2 > 0:
+            rr = abs(tp2 - entry) / abs(entry - sl)
+            if rr < 1.0:
+                logger.info(f"🚫 Low R:R: 1:{rr:.1f} < 1:1.0")
+                return False
+        return True
+
     async def process_signals(self, signals: List[Dict]):
-        """يوزع الإشارات على القنوات المناسبة"""
+        """يوزع الإشارات على القنوات المناسبة — مع فلترة وتأكيد"""
         # تحسين الإشارات بالتطابق متعدد الأطر
         try:
             confluence_data = self.confluence.analyze_confluence()
@@ -300,7 +372,24 @@ class CandleHunterSignalBot:
         except Exception as e:
             logger.warning(f"Confluence analysis failed: {e}")
 
+        # فلترة الإشارات: مسافة + تكرار + تأكيد
+        filtered_signals = []
         for signal in signals:
+            if not self._filter_distance(signal):
+                continue
+            if not self._confirm_signal(signal):
+                continue
+            if self._is_duplicate_signal(signal):
+                continue
+            filtered_signals.append(signal)
+
+        if not filtered_signals:
+            logger.info(f"📊 All {len(signals)} signals filtered out - nothing to send")
+            return
+
+        logger.info(f"📊 {len(signals)} signals → {len(filtered_signals)} after filtering")
+
+        for signal in filtered_signals:
             capital_plans = self.risk_manager.get_all_capital_plans(signal)
             channels = self.channel_manager.get_channel_for_signal(signal)
 
@@ -318,9 +407,9 @@ class CandleHunterSignalBot:
                     logger.error(f"Error sending to {channel}: {e}")
 
         # 📡 إرسال الإشارة لبوت التداول التلقائي (عبر HTTP API)
-        if signals:
+        if filtered_signals:
             try:
-                forward_result = await self.forwarder.forward_signal(signals[0])
+                forward_result = await self.forwarder.forward_signal(filtered_signals[0])
                 if forward_result.get("success"):
                     logger.info(f"📡 Signal forwarded to trade bot successfully")
                 else:
@@ -374,6 +463,42 @@ class CandleHunterSignalBot:
 
         except Exception as e:
             logger.error(f"Error sending message: {e}")
+
+    async def _send_close_notification(self, signal: Dict):
+        """رسالة إغلاق الصفقة لما TP أو SL يوصل"""
+        is_win = signal.get("result") == "WIN"
+        emoji = "✅" if is_win else "❌"
+        result_text = "ضرب الهدف 🎯" if is_win else "ضرب الستوب 🛑"
+        direction = "شراء" if signal.get("signal_type") == "BUY" else "بيع"
+
+        entry = signal.get("entry_price", 0)
+        exit_price = signal.get("exit_price", 0)
+        pnl_pct = ((exit_price - entry) / entry * 100) if is_win else ((exit_price - entry) / entry * 100)
+        if signal.get("signal_type") == "SELL" and not is_win:
+            pnl_pct = abs(pnl_pct)
+        sign = "+" if pnl_pct > 0 else ""
+
+        msg = f"{emoji} إغلاق صفقة | XAU/USD\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += f"📊 {direction} → {result_text}\n"
+        msg += f"💵 الدخول: {entry:,.2f}\n"
+        msg += f"🏁 الخروج: {exit_price:,.2f}\n"
+        msg += f"📈 النتيجة: {sign}{pnl_pct:.2f}%\n\n"
+        msg += f"📅 {signal.get('exit_time', datetime.now().strftime('%Y-%m-%d %H:%M'))}\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += "🤖 صياد الشمعات | Candle Hunter"
+
+        # إرسال للقناة الخاصة
+        if self.private_channel:
+            try:
+                await self.bot.send_message(
+                    chat_id=self.private_channel,
+                    text=msg,
+                    parse_mode='HTML'
+                )
+                logger.info(f"📢 Close notification sent: {signal['id']} → {signal['result']}")
+            except Exception as e:
+                logger.error(f"Error sending close notification: {e}")
 
     # ═══════════════════════════════════════════════════════════
     # Telegram Commands

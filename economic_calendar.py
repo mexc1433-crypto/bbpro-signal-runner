@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Economic Calendar
+صياد الشمعات | Candle Hunter - Economic Calendar
 تنبيهات الأخبار الاقتصادية المؤثرة على الذهب
 """
 import logging
@@ -167,7 +167,7 @@ class EconomicCalendar:
 
         msg += "⚠️ تجنب التداول وقت الأخبار عالية التأثير\n"
         msg += f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-        msg += "🤖 BBPro Signal"
+        msg += "🤖 صياد الشمعات | Candle Hunter"
 
         return msg
 
@@ -183,6 +183,6 @@ class EconomicCalendar:
             msg += f"📈 سابق: {event['previous']}\n"
         msg += "\n🚫 يرجى الحذر - توقف الإشارات مؤقتاً\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
-        msg += "🤖 BBPro Signal"
+        msg += "🤖 صياد الشمعات | Candle Hunter"
 
         return msg

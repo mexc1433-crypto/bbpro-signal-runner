@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Trading Strategies
+صياد الشمعات | Candle Hunter - Trading Strategies
 13 استراتيجيات تداول متقدمة
 """
 import pandas as pd

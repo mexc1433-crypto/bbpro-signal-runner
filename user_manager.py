@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - User Manager
+صياد الشمعات | Candle Hunter - User Manager
 إدارة المستخدمين المسجلين + التشفير
 """
 import json

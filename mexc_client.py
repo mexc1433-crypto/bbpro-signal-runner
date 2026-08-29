@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - MEXC Client
+صياد الشمعات | Candle Hunter - MEXC Client
 عميل MEXC للتنفيذ التلقائي + التحقق من الإحالات
 """
 import hashlib

@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Technical Indicators
+صياد الشمعات | Candle Hunter - Technical Indicators
 مؤشرات فنية شاملة - 22+ مؤشر
 """
 import pandas as pd

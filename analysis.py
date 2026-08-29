@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Market Analysis
+صياد الشمعات | Candle Hunter - Market Analysis
 تحليل سوق الذهب (XAU/USD) المتقدم - متعدد الأطر الزمنية
 """
 import pandas as pd

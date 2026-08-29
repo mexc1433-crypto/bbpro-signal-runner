@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Multi-Timeframe Confluence
+صياد الشمعات | Candle Hunter - Multi-Timeframe Confluence
 تحليل التطابق بين أطر زمنية متعددة (1h + 4h + 1d)
 """
 import logging
@@ -150,7 +150,7 @@ class ConfluenceAnalyzer:
             msg += "\n"
 
         msg += f"\n📅 تحليل لحظي\n"
-        msg += "🤖 BBPro Signal"
+        msg += "🤖 صياد الشمعات | Candle Hunter"
 
         return msg
 

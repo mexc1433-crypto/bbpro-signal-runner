@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Risk Manager
+صياد الشمعات | Candle Hunter - Risk Manager
 إدارة المخاطر وتقسيم رأس المال
 """
 import numpy as np

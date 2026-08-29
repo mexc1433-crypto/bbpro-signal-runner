@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Auto Trader
+صياد الشمعات | Candle Hunter - Auto Trader
 محرك التنفيذ التلقائي متعدد الحسابات
 """
 import asyncio
@@ -230,6 +230,6 @@ class AutoTrader:
                     msg += f"{u['result'].get('error', 'فشل')}\n"
 
         msg += f"\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-        msg += "🤖 BBPro Signal"
+        msg += "🤖 صياد الشمعات | Candle Hunter"
 
         return msg

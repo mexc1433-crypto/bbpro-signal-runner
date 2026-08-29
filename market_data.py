@@ -1,5 +1,5 @@
 """
-BBPro Signal Bot - Market Data Fetcher
+صياد الشمعات | Candle Hunter - Market Data Fetcher
 جلب بيانات الذهب (XAU/USD) من Yahoo Finance API مباشرة
 """
 import pandas as pd
