@@ -20,6 +20,62 @@ class SignalTracker:
         self.signals: List[Dict] = []
         self._load()
 
+    # ===== FEATURE 6: Daily Drawdown Limit =====
+    MAX_DAILY_LOSSES = 3         # إيقاف بعد 3 خسائر في يوم واحد
+    MAX_DAILY_DRAWDOWN_PCT = 5.0  # إيقاف بعد خسارة 5% من رأس المال
+
+    def get_daily_stats(self, date_str: str = None) -> Dict:
+        """إحصائيات يوم واحد — للـ drawdown limit"""
+        if date_str is None:
+            date_str = datetime.now().strftime('%Y-%m-%d')
+
+        today_signals = []
+        for s in self.signals:
+            try:
+                created = datetime.fromisoformat(s.get("created_at", ""))
+                if created.strftime('%Y-%m-%d') == date_str:
+                    today_signals.append(s)
+            except:
+                continue
+
+        closed = [s for s in today_signals if s["status"] == "CLOSED"]
+        losses = [s for s in closed if s["result"] == "LOSS"]
+        wins = [s for s in closed if s["result"] == "WIN"]
+
+        # حساب الخسارة كنسبة
+        total_pnl = 0
+        for s in closed:
+            entry = s.get("entry_price", 0)
+            exit_p = s.get("exit_price", 0)
+            if entry > 0 and exit_p > 0:
+                if s["signal_type"] == "BUY":
+                    pnl = (exit_p - entry) / entry * 100
+                else:
+                    pnl = (entry - exit_p) / entry * 100
+                total_pnl += pnl
+
+        return {
+            "date": date_str,
+            "total": len(today_signals),
+            "wins": len(wins),
+            "losses": len(losses),
+            "pnl_pct": total_pnl,
+            "should_stop": len(losses) >= self.MAX_DAILY_LOSSES or total_pnl <= -self.MAX_DAILY_DRAWDOWN_PCT,
+            "stop_reason": (
+                f"خسائر {len(losses)}/{self.MAX_DAILY_LOSSES}" if len(losses) >= self.MAX_DAILY_LOSSES
+                else f"drawdown {total_pnl:.1f}% حد {self.MAX_DAILY_DRAWDOWN_PCT}%"
+                if total_pnl <= -self.MAX_DAILY_DRAWDOWN_PCT
+                else None
+            )
+        }
+
+    def should_pause_trading(self) -> tuple:
+        """هل نوقف التداول اليوم؟ Returns: (bool, reason)"""
+        stats = self.get_daily_stats()
+        if stats["should_stop"]:
+            return True, f"🛑 إيقاف يومي: {stats['stop_reason']}"
+        return False, None
+
     def _load(self):
         """تحميل الإشارات من ملف JSON"""
         try:
@@ -65,34 +121,93 @@ class SignalTracker:
         logger.info(f"Tracking signal: {entry['id']} {entry['signal_type']} {entry['symbol']}")
 
     def check_pending_signals(self, current_price: float) -> List[Dict]:
-        """فحص الإشارات المعلقة وتحديث النتيجة"""
+        """فحص الإشارات المعلقة — مع Partial TP و Trailing Stop"""
         updated = []
         for sig in self.signals:
             if sig["status"] != "PENDING":
                 continue
 
             entry = sig["entry_price"]
-            tp1 = sig["take_profit_1"]
-            sl = sig["stop_loss"]
+            tp1 = sig.get("take_profit_1", 0)
+            tp2 = sig.get("take_profit_2", 0)
+            sl = sig.get("stop_loss", 0)
             is_buy = sig["signal_type"] == "BUY"
+            now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
 
-            hit_tp = current_price >= tp1 if is_buy else current_price <= tp1
+            hit_tp1 = tp1 > 0 and (current_price >= tp1 if is_buy else current_price <= tp1)
+            hit_tp2 = tp2 > 0 and (current_price >= tp2 if is_buy else current_price <= tp2)
             hit_sl = current_price <= sl if is_buy else current_price >= sl
 
-            if hit_tp:
-                sig["status"] = "CLOSED"
-                sig["result"] = "WIN"
+            # ===== FEATURE 3: Partial TP =====
+            # TP1 → أغلق 50% من الصفقة (WIN_PARTIAL)
+            if hit_tp1 and not sig.get("tp1_hit", False):
+                sig["tp1_hit"] = True
+                sig["tp1_price"] = current_price
                 sig["exit_price"] = current_price
-                sig["exit_time"] = datetime.now().strftime('%Y-%m-%d %H:%M')
+                sig["exit_time"] = now_str
+                sig["result"] = "WIN"
+                sig["status"] = "CLOSED"
+                sig["close_type"] = "PARTIAL_TP1"
                 updated.append(sig)
-                logger.info(f"✅ WIN: {sig['id']} {sig['strategy_name']} exited at {current_price}")
+                logger.info(f"✅ WIN (TP1): {sig['id']} {sig['strategy_name']} exited at {current_price}")
+
+            # TP2 → أغلق الصفقة بالكامل (WIN_FULL)
+            elif hit_tp2 and not sig.get("tp2_hit", False) and not sig.get("tp1_hit", False):
+                sig["tp2_hit"] = True
+                sig["tp2_price"] = current_price
+                sig["exit_price"] = current_price
+                sig["exit_time"] = now_str
+                sig["result"] = "WIN"
+                sig["status"] = "CLOSED"
+                sig["close_type"] = "FULL_TP2"
+                updated.append(sig)
+                logger.info(f"✅ WIN (TP2): {sig['id']} {sig['strategy_name']} exited at {current_price}")
+
+            # ===== FEATURE 4: Trailing Stop بعد TP1 =====
+            # لو TP1 ضرب بس لسه في PENDING partial → حرك الستوب لBreak-even
+            elif sig.get("tp1_hit", False) and sig.get("status") == "PENDING":
+                if not sig.get("trailing_activated", False):
+                    # أول مرة بعد TP1 → حرك لBreak-even
+                    sig["stop_loss"] = entry  # Break-even
+                    sig["trailing_activated"] = True
+                    sig["trailing_stop"] = entry
+                    logger.info(f"📐 Trailing: {sig['id']} moved SL to break-even ({entry})")
+
+                else:
+                    # Trailing — ارفع الستوب مع كل حركة لصالحنا
+                    current_trail = sig.get("trailing_stop", entry)
+                    if is_buy:
+                        new_trail = max(current_trail, current_price * 0.998)  # 0.2% trail
+                        if new_trail > current_trail:
+                            sig["trailing_stop"] = new_trail
+                            sig["stop_loss"] = new_trail
+                    else:
+                        new_trail = min(current_trail, current_price * 1.002)
+                        if new_trail < current_trail:
+                            sig["trailing_stop"] = new_trail
+                            sig["stop_loss"] = new_trail
+
+                    # لو التريلينج ضرب → أغلق
+                    trailing_hit = current_price <= sig.get("trailing_stop", entry) if is_buy \
+                        else current_price >= sig.get("trailing_stop", entry)
+                    if trailing_hit:
+                        sig["exit_price"] = current_price
+                        sig["exit_time"] = now_str
+                        sig["result"] = "WIN"
+                        sig["status"] = "CLOSED"
+                        sig["close_type"] = "TRAILING_STOP"
+                        updated.append(sig)
+                        logger.info(f"✅ WIN (Trailing): {sig['id']} exited at {current_price}")
+
+            # ===== Stop Loss =====
             elif hit_sl:
                 sig["status"] = "CLOSED"
                 sig["result"] = "LOSS"
                 sig["exit_price"] = current_price
-                sig["exit_time"] = datetime.now().strftime('%Y-%m-%d %H:%M')
+                sig["exit_time"] = now_str
+                sig["close_type"] = "STOP_LOSS"
                 updated.append(sig)
-                logger.info(f"❌ LOSS: {sig['id']} {sig['strategy_name']} exited at {current_price}")
+                logger.info(f"❌ LOSS (SL): {sig['id']} {sig['strategy_name']} exited at {current_price}")
 
         if updated:
             self._save()

@@ -61,6 +61,7 @@ from chart_generator import generate_signal_chart
 from economic_calendar import EconomicCalendar
 from confluence import ConfluenceAnalyzer
 from enhanced_confluence import EnhancedConfluence
+from signal_filters import VolatilityFilter, ActiveHoursFilter
 from user_manager import UserManager, Encryption
 from auto_trader import AutoTrader
 from signal_forwarder import SignalForwarder
@@ -99,6 +100,8 @@ class CandleHunterSignalBot:
         self.calendar = EconomicCalendar()
         self.confluence = ConfluenceAnalyzer(self.fetcher)
         self.enhanced_confluence = EnhancedConfluence(self.fetcher)
+        self.volatility_filter = VolatilityFilter()
+        self.active_hours_filter = ActiveHoursFilter()
         self.user_manager = UserManager()
 
         # Auto-trader (سيتم تهيئته بعد قراءة env vars)
@@ -241,6 +244,12 @@ class CandleHunterSignalBot:
             logger.info(f"🚫 Weekend filter: market closed (day={weekday}). No signals.")
             return all_signals
 
+        # 🛑 FEATURE 6: Daily Drawdown Limit — إيقاف بعد 3 خسائر أو 5% drawdown
+        should_stop, stop_reason = self.tracker.should_pause_trading()
+        if should_stop:
+            logger.warning(stop_reason)
+            return all_signals
+
         # إيقاف الإشارات وقت الأخبار عالية التأثير (60 دقيقة قبل وبعد)
         try:
             if self.calendar.is_high_impact_soon(60):
@@ -293,6 +302,13 @@ class CandleHunterSignalBot:
                         logger.warning(f"Insufficient data for {symbol} {timeframe}")
                         continue
 
+                    # 📊 FEATURE 1: Volatility Filter
+                    current_price = df['close'].iloc[-1]
+                    vol_check = self.volatility_filter.check(df, current_price)
+                    if not vol_check["ok"]:
+                        logger.info(f"🚫 Volatility filter: {vol_check['reason']}")
+                        continue
+
                     for strat_name in strategy_names:
                         if strat_name not in self.strategies:
                             continue
@@ -307,6 +323,10 @@ class CandleHunterSignalBot:
                                 signal["timeframe"] = timeframe
                                 signal["trade_type"] = trade_t
                                 signal["timestamp"] = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+                                # ⏰ FEATURE 5: Active Hours Filter
+                                signal = self.active_hours_filter.apply(signal)
+
                                 all_signals.append(signal)
                         except Exception as e:
                             logger.error(f"Error scanning {symbol} {tf} {strat_name}: {e}")
@@ -407,9 +427,31 @@ class CandleHunterSignalBot:
             except Exception as e2:
                 logger.warning(f"Legacy confluence also failed: {e2}")
 
+        # 🎯 FEATURE 2: Multi-Signal Confirmation — لازم استراتيجيتين توافقوا على نفس الاتجاه
+        direction_counts = {}
+        for s in signals:
+            d = s.get("signal_type", "")
+            direction_counts[d] = direction_counts.get(d, 0) + 1
+
+        confirmed_signals = []
+        for s in signals:
+            d = s.get("signal_type", "")
+            if direction_counts.get(d, 0) >= 2:
+                s["multi_confirmed"] = True
+                s["confirming_strategies"] = direction_counts[d]
+                confirmed_signals.append(s)
+            else:
+                logger.info(f"🚫 Not multi-confirmed: {s.get('strategy_name')} {d} (only 1 strategy)")
+
+        if not confirmed_signals:
+            logger.info(f"📊 No multi-confirmed signals (need 2+ strategies agreeing)")
+            return
+
+        logger.info(f"📊 {len(signals)} signals → {len(confirmed_signals)} multi-confirmed")
+
         # فلترة الإشارات: مسافة + تكرار + تأكيد
         filtered_signals = []
-        for signal in signals:
+        for signal in confirmed_signals:
             if not self._filter_distance(signal):
                 continue
             if not self._confirm_signal(signal):
@@ -419,10 +461,10 @@ class CandleHunterSignalBot:
             filtered_signals.append(signal)
 
         if not filtered_signals:
-            logger.info(f"📊 All {len(signals)} signals filtered out - nothing to send")
+            logger.info(f"📊 All {len(confirmed_signals)} confirmed signals filtered out")
             return
 
-        logger.info(f"📊 {len(signals)} signals → {len(filtered_signals)} after filtering")
+        logger.info(f"📊 {len(confirmed_signals)} confirmed → {len(filtered_signals)} after filtering")
 
         sent_directions = set()
         for signal in filtered_signals:

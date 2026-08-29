@@ -76,11 +76,22 @@ def format_signal_message(signal: Dict, capital_plans: List[Dict],
 
     msg += f"💵 سعر الدخول: {_fmt_price(entry)}\n\n"
 
-    msg += f"🎯 TP1: {_fmt_price(signal['take_profit_1'])} ({_fmt_pct(entry, signal['take_profit_1'])})\n"
-    msg += f"🎯 TP2: {_fmt_price(signal['take_profit_2'])} ({_fmt_pct(entry, signal['take_profit_2'])})\n"
-    msg += f"🎯 TP3: {_fmt_price(signal['take_profit_3'])} ({_fmt_pct(entry, signal['take_profit_3'])})\n"
+    msg += f"🎯 TP1: {_fmt_price(signal['take_profit_1'])} ({_fmt_pct(entry, signal['take_profit_1'])}) — 50%\n"
+    msg += f"🎯 TP2: {_fmt_price(signal['take_profit_2'])} ({_fmt_pct(entry, signal['take_profit_2'])}) — 30%\n"
+    msg += f"🎯 TP3: {_fmt_price(signal['take_profit_3'])} ({_fmt_pct(entry, signal['take_profit_3'])}) — 20%\n"
     msg += f"🛑 SL: {_fmt_price(signal['stop_loss'])} ({_fmt_pct(entry, signal['stop_loss'])})\n\n"
 
+    # Multi-confirmation badge
+    if signal.get("multi_confirmed"):
+        msg += f"✅ تأكيد متعدد: {signal.get('confirming_strategies', 0)} استراتيجية\n"
+    # Session badge
+    if signal.get("session_name"):
+        msg += f"⏰ الجلسة: {signal['session_name']}\n"
+    # Confluence boost badge
+    if signal.get("confluence_boost"):
+        msg += f"🔬 تطابق: +{signal['confluence_boost']}% ({signal.get('confluence_agreement', 0):.0f}% توافق)\n"
+
+    msg += "\n"
     msg += f"📅 {signal.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M'))}\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += "⚠️ ليست نصيحة استثمارية\n"
