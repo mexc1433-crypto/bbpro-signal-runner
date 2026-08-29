@@ -403,7 +403,14 @@ class CandleHunterSignalBot:
 
         logger.info(f"📊 {len(signals)} signals → {len(filtered_signals)} after filtering")
 
+        sent_directions = set()
         for signal in filtered_signals:
+            # منع تكرار نفس الاتجاه داخل نفس المسح
+            sig_dir = signal.get("signal_type", "")
+            if sig_dir in sent_directions:
+                logger.info(f"🚫 Skip duplicate direction in same scan: {sig_dir}")
+                continue
+
             capital_plans = self.risk_manager.get_all_capital_plans(signal)
             channels = self.channel_manager.get_channel_for_signal(signal)
 
@@ -416,6 +423,7 @@ class CandleHunterSignalBot:
                     await self.send_signal_to_channel(signal, capital_plans, channel)
                     self.channel_manager.record_signal(channel, signal)
                     self.signal_history.append({**signal, "channel": channel})
+                    sent_directions.add(sig_dir)
                     await asyncio.sleep(2)
                 except Exception as e:
                     logger.error(f"Error sending to {channel}: {e}")
@@ -467,7 +475,13 @@ class CandleHunterSignalBot:
                     timeframe = signal.get("timeframe", "1h")
                     df = self.fetcher.fetch_ohlcv("XAU/USD", timeframe, 100)
                     if df is not None and not df.empty and len(df) >= 20:
-                        chart_path = generate_signal_chart(df, signal, "signal_chart.png")
+                        # mplfinance requires capitalized column names
+                        df_chart = df.rename(columns={
+                            'open': 'Open', 'high': 'High',
+                            'low': 'Low', 'close': 'Close',
+                            'volume': 'Volume'
+                        })
+                        chart_path = generate_signal_chart(df_chart, signal, "signal_chart.png")
                         logger.info(f"📊 Chart generated for high-confidence signal ({signal['confidence']}%)")
                 except Exception as e:
                     logger.warning(f"Chart generation failed: {e}")
