@@ -234,6 +234,13 @@ class CandleHunterSignalBot:
         except Exception as e:
             logger.warning(f"Signal tracking check failed: {e}")
 
+        # 🚫 فلتر الويك إند — سوق الذهب الحقيقي مقفول السبت والأحد
+        today = datetime.now()
+        weekday = today.weekday()  # 0=Monday, 5=Saturday, 6=Sunday
+        if weekday >= 5:
+            logger.info(f"🚫 Weekend filter: market closed (day={weekday}). No signals.")
+            return all_signals
+
         # إيقاف الإشارات وقت الأخبار عالية التأثير (60 دقيقة قبل وبعد)
         try:
             if self.calendar.is_high_impact_soon(60):
@@ -1272,6 +1279,11 @@ class CandleHunterSignalBot:
     async def send_daily_summary(self):
         """يرسل ملخص يومي شامل للقناة الخاصة"""
         if not self.private_channel:
+            return
+
+        # لا ترسل ملخص في الويك إند
+        if datetime.now().weekday() >= 5:
+            logger.info("📊 Daily summary skipped — weekend")
             return
         try:
             # تقرير الإحصائيات التفصيلي
