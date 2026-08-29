@@ -60,6 +60,7 @@ from signal_tracker import SignalTracker
 from chart_generator import generate_signal_chart
 from economic_calendar import EconomicCalendar
 from confluence import ConfluenceAnalyzer
+from enhanced_confluence import EnhancedConfluence
 from user_manager import UserManager, Encryption
 from auto_trader import AutoTrader
 from signal_forwarder import SignalForwarder
@@ -97,6 +98,7 @@ class CandleHunterSignalBot:
         self.tracker = SignalTracker()
         self.calendar = EconomicCalendar()
         self.confluence = ConfluenceAnalyzer(self.fetcher)
+        self.enhanced_confluence = EnhancedConfluence(self.fetcher)
         self.user_manager = UserManager()
 
         # Auto-trader (سيتم تهيئته بعد قراءة env vars)
@@ -141,6 +143,8 @@ class CandleHunterSignalBot:
             [InlineKeyboardButton("🔍 تحليل السوق", callback_data="analysis"),
              InlineKeyboardButton("📈 ملخص اليوم", callback_data="summary")],
             [InlineKeyboardButton("🎯 تحليل التطابق", callback_data="confluence"),
+             InlineKeyboardButton("🔬 تحليل 20 مؤشر", callback_data="scan_pro")],
+            [InlineKeyboardButton("📈 الإحصائيات", callback_data="stats"),
              InlineKeyboardButton("📅 الأحداث الاقتصادية", callback_data="calendar")],
         ]
 
@@ -374,17 +378,27 @@ class CandleHunterSignalBot:
 
     async def process_signals(self, signals: List[Dict]):
         """يوزع الإشارات على القنوات المناسبة — مع فلترة وتأكيد"""
-        # تحسين الإشارات بالتطابق متعدد الأطر
+        # تحسين الإشارات بالتطابق المحسّن (20 مؤشر على 5 أطر زمنية)
         try:
-            confluence_data = self.confluence.analyze_confluence()
-            if confluence_data and confluence_data.get("confidence_boost", 0) > 0:
+            enhanced_data = self.enhanced_confluence.analyze(["5m", "15m", "1h", "4h", "1d"])
+            if enhanced_data and enhanced_data.get("direction") != "NEUTRAL":
                 for signal in signals:
-                    self.confluence.enhance_signal_with_confluence(signal, confluence_data)
-                logger.info(f"Confluence: {confluence_data['confluence_level']} (+{confluence_data['confidence_boost']}%)")
+                    self.enhanced_confluence.enhance_signal(signal, enhanced_data)
+                logger.info(f"Enhanced Confluence: {enhanced_data['direction']} "
+                           f"(agreement={enhanced_data['agreement_score']:.0f}%, "
+                           f"buy={enhanced_data['total_buy']}, sell={enhanced_data['total_sell']})")
             else:
-                logger.info(f"Confluence: {confluence_data.get('confluence_level', 'N/A')} (no boost)")
+                logger.info(f"Enhanced Confluence: NEUTRAL (no boost)")
         except Exception as e:
-            logger.warning(f"Confluence analysis failed: {e}")
+            logger.warning(f"Enhanced confluence failed, trying legacy: {e}")
+            try:
+                confluence_data = self.confluence.analyze_confluence()
+                if confluence_data and confluence_data.get("confidence_boost", 0) > 0:
+                    for signal in signals:
+                        self.confluence.enhance_signal_with_confluence(signal, confluence_data)
+                    logger.info(f"Legacy Confluence: {confluence_data['confluence_level']} (+{confluence_data['confidence_boost']}%)")
+            except Exception as e2:
+                logger.warning(f"Legacy confluence also failed: {e2}")
 
         # فلترة الإشارات: مسافة + تكرار + تأكيد
         filtered_signals = []
@@ -728,13 +742,44 @@ class CandleHunterSignalBot:
         await update.message.reply_text(message, parse_mode='HTML')
 
     async def cmd_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """أمر /performance"""
+        """أمر /performance — تقرير 7 أيام"""
         user_id = update.effective_user.id
         if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
             await update.message.reply_text("❌ لازم تسجل أول مرة. اكتب /start")
             return
         report = self.tracker.get_performance_report(days=7)
         await update.message.reply_text(report)
+
+    async def cmd_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /stats — لوحة إحصائيات شاملة (30 يوم)"""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
+            await update.message.reply_text("❌ لازم تسجل أول مرة. اكتب /start")
+            return
+
+        # لو المستخدم كتب رقم بعد /stats
+        days = 30
+        if context.args and context.args[0].isdigit():
+            days = int(context.args[0])
+            days = min(days, 365)
+
+        report = self.tracker.format_detailed_report(days=days)
+        await update.message.reply_text(report)
+
+    async def cmd_confluence_enhanced(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """أمر /scan_pro — تحليل تطابق محسّن (20 مؤشر)"""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
+            await update.message.reply_text("❌ لازم تسجل أول مرة. اكتب /start")
+            return
+        await update.message.reply_text("🔬 جاري تحليل 20 مؤشر على 5 أطر زمنية...")
+        try:
+            data = self.enhanced_confluence.analyze(["5m", "15m", "1h", "4h", "1d"])
+            msg = self.enhanced_confluence.format_report(data)
+            await update.message.reply_text(msg)
+        except Exception as e:
+            logger.error(f"Enhanced confluence command error: {e}")
+            await update.message.reply_text("❌ حدث خطأ في التحليل")
 
     async def cmd_calendar(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /calendar"""
@@ -997,6 +1042,26 @@ class CandleHunterSignalBot:
             msg = self.confluence.format_confluence_report(conf_data)
             await query.edit_message_text(msg)
 
+        elif data == "scan_pro":
+            await query.edit_message_text("🔬 جاري تحليل 20 مؤشر على 5 أطر زمنية...")
+            try:
+                enhanced_data = self.enhanced_confluence.analyze(["5m", "15m", "1h", "4h", "1d"])
+                msg = self.enhanced_confluence.format_report(enhanced_data)
+                # Split if too long for Telegram
+                if len(msg) > 4096:
+                    await query.edit_message_text(msg[:4096])
+                else:
+                    await query.edit_message_text(msg)
+            except Exception as e:
+                await query.edit_message_text(f"❌ خطأ في التحليل: {e}")
+
+        elif data == "stats":
+            report = self.tracker.format_detailed_report(days=30)
+            if len(report) > 4096:
+                await query.edit_message_text(report[:4096])
+            else:
+                await query.edit_message_text(report)
+
         elif data == "calendar":
             events = self.calendar.get_upcoming_events(hours_ahead=48)
             msg = self.calendar.format_events_message(events)
@@ -1205,17 +1270,31 @@ class CandleHunterSignalBot:
             logger.error(f"Analysis error: {e}")
 
     async def send_daily_summary(self):
-        """يرسل ملخص يومي للقناة الخاصة"""
+        """يرسل ملخص يومي شامل للقناة الخاصة"""
         if not self.private_channel:
             return
         try:
-            if self.signal_history:
-                message = format_summary_message(self.signal_history)
+            # تقرير الإحصائيات التفصيلي
+            report = self.tracker.format_detailed_report(days=1)
+            await self.bot.send_message(
+                chat_id=self.private_channel,
+                text=report
+            )
+
+            # ملخص الإشارات
+            today_signals = [
+                s for s in self.signal_history
+                if s.get("timestamp", "").startswith(datetime.now().strftime('%Y-%m-%d'))
+            ]
+            if today_signals:
+                message = format_summary_message(today_signals)
                 await self.bot.send_message(
                     chat_id=self.private_channel,
                     text=message,
                     parse_mode='HTML'
                 )
+
+            logger.info(f"Daily summary sent: {len(today_signals)} signals today")
         except Exception as e:
             logger.error(f"Daily summary error: {e}")
 
@@ -1348,6 +1427,8 @@ class CandleHunterSignalBot:
         app.add_handler(CommandHandler("analysis", self.cmd_analysis))
         app.add_handler(CommandHandler("summary", self.cmd_summary))
         app.add_handler(CommandHandler("performance", self.cmd_performance))
+        app.add_handler(CommandHandler("stats", self.cmd_stats))
+        app.add_handler(CommandHandler("scan_pro", self.cmd_confluence_enhanced))
         app.add_handler(CommandHandler("calendar", self.cmd_calendar))
         app.add_handler(CommandHandler("confluence", self.cmd_confluence))
 
