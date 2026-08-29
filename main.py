@@ -1195,18 +1195,7 @@ class CandleHunterSignalBot:
                 await asyncio.sleep(30)
 
         async def post_init(app):
-            await self.bot.send_message(
-                chat_id=self.private_channel or self.public_channel,
-                text=(
-                    "🤖 صياد الشمعات | Candle Hunter بدأ العمل!\n\n"
-                    "✅ جميع الأنظمة جاهزة\n"
-                    "📊 13 استراتيجيات | 22+ مؤشر | XAU/USD فقط\n"
-                    f"🤖 Auto-Trade: {'✅ مفعل' if self.auto_trader.owner_client else '❌ غير مفعل'}\n"
-                    f"👥 المسجلين: {self.user_manager.get_stats()['total']}\n"
-                    "⏱️ المسح التلقائي مفعّل\n"
-                    "🔄 أول مسح بعد 30 ثانية"
-                )
-            )
+            # لا إرسال رسالة بدء في القناة
             asyncio.create_task(run_scheduler(app))
 
         app.post_init = post_init
