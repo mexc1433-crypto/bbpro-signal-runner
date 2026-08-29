@@ -19,10 +19,10 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 # ═══════════════════════════════════════════════════════════════
 # Data Source Configuration
 # ═══════════════════════════════════════════════════════════════
-# نستخدم Yahoo Finance لجلب بيانات الذهب (XAU/USD)
-# GC=F = Gold Futures, XAUUSD=X = Forex Gold Spot
-DATA_SOURCE = os.getenv("DATA_SOURCE", "yfinance")
-GOLD_SYMBOL = os.getenv("GOLD_SYMBOL", "GC=F")  # أو XAUUSD=X
+# مصدر البيانات الرئيسي: MEXC (XAU/USDT:USDT) — لحظي 100%
+# Yahoo Finance كـ fallback + مؤشرات السوق (VIX, DXY)
+DATA_SOURCE = os.getenv("DATA_SOURCE", "mexc")
+GOLD_SYMBOL = os.getenv("GOLD_SYMBOL", "GC=F")  # fallback للـ Yahoo
 GOLD_DISPLAY_NAME = "XAU/USD"
 
 # ═══════════════════════════════════════════════════════════════
