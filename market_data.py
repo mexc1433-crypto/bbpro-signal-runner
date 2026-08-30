@@ -244,6 +244,25 @@ class MarketDataFetcher:
                 }
             except Exception as e:
                 logger.warning(f"MEXC ticker error: {e}")
+                
+                # Fallback: use last OHLCV candle as ticker
+                try:
+                    df = self._mexc_fetch_ohlcv("1m", 2)
+                    if df is not None and not df.empty and len(df) >= 2:
+                        last_price = float(df["close"].iloc[-1])
+                        prev_price = float(df["close"].iloc[-2])
+                        change_pct = ((last_price - prev_price) / prev_price * 100) if prev_price else 0
+                        logger.info(f"MEXC ticker via OHLCV: ${last_price:.2f}")
+                        return {
+                            "symbol": self.display_name,
+                            "last": last_price,
+                            "high": float(df["high"].max()),
+                            "low": float(df["low"].min()),
+                            "volume": float(df["volume"].sum()),
+                            "change_pct": change_pct,
+                        }
+                except Exception as e2:
+                    logger.warning(f"OHLCV ticker fallback failed: {e2}")
 
         # 2. Yahoo fallback
         try:
