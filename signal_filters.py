@@ -150,7 +150,7 @@ class TrendFilter:
         trends = {}
         for tf in ["4h", "1d"]:
             try:
-                df = self.fetcher.fetch_candles("XAU/USD", tf, limit=100)
+                df = self.fetcher.fetch_ohlcv("XAU/USD", tf, limit=100)
                 if df.empty or len(df) < 50:
                     continue
 
