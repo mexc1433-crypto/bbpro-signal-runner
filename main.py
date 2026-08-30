@@ -115,8 +115,7 @@ class CandleHunterSignalBot:
         self.price_alerts = PriceAlertManager()
         self.broadcast_state = {}  # for broadcast feature
 
-        # ===== Advanced Features =====
-        self.balance_checker = BalanceChecker(self.auto_trader)
+        # ===== Advanced Features (non-dependent on auto_trader) =====
         self.position_sizer = SmartPositionSizer()
         self.conflict_resolver = ConflictResolver()
         self.fear_greed = FearGreedIndex()
@@ -135,6 +134,7 @@ class CandleHunterSignalBot:
         owner_api_secret = os.getenv("MEXC_API_SECRET", "")
         self.forwarder = SignalForwarder()
         self.auto_trader = AutoTrader(self.user_manager, owner_api_key, owner_api_secret)
+        self.balance_checker = BalanceChecker(self.auto_trader)
 
         self.strategies = ALL_STRATEGIES
         self.signal_history: List[Dict] = []
