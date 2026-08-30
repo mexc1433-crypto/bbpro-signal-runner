@@ -1684,20 +1684,12 @@ class CandleHunterSignalBot:
     def _schedule_async(self, coro_func):
         """يضيف coroutine task للـ event loop النشط"""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(coro_func(), loop=loop)
-            else:
-                loop.run_until_complete(coro_func())
+            loop = asyncio.get_running_loop()
+            asyncio.ensure_future(coro_func(), loop=loop)
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(coro_func())
-            except Exception as e:
-                logger.error(f"Job error: {e}")
-            finally:
-                loop.close()
+            logger.warning("No running loop for scheduled job, skipping")
+        except Exception as e:
+            logger.error(f"Schedule async error: {e}")
 
     def scheduled_scalping(self):
         logger.info("⏰ Scalping schedule triggered")
@@ -1816,10 +1808,24 @@ class CandleHunterSignalBot:
             await self.run_scalping_scan()
             logger.info("🔄 Running initial medium scan...")
             await self.run_medium_scan()
+            logger.info("✅ Scheduler loop started — running every 30s")
 
+            heartbeat = 0
             while True:
-                schedule.run_pending()
-                await asyncio.sleep(30)
+                try:
+                    schedule.run_pending()
+                    heartbeat += 1
+                    # Log heartbeat every 5 min (10 loops × 30s)
+                    if heartbeat % 10 == 0:
+                        next_jobs = []
+                        for job in schedule.jobs:
+                            if job.next_run:
+                                next_jobs.append(f"{job.job_func.__name__}@{job.next_run.strftime('%H:%M')}")
+                        logger.info(f"💓 Scheduler heartbeat #{heartbeat} | Next: {', '.join(next_jobs[:3]) if next_jobs else 'none'}")
+                    await asyncio.sleep(30)
+                except Exception as e:
+                    logger.error(f"Scheduler loop error: {e}")
+                    await asyncio.sleep(10)
 
         async def post_init(app):
             # لا إرسال رسالة بدء في القناة
