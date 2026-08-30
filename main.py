@@ -128,6 +128,7 @@ class CandleHunterSignalBot:
         self.cooldown = SignalCooldown()
         self.market_hours = MarketHoursManager()
         self.auto_restart = AutoRestartManager()
+        self._scheduler_task = None
         self.pre_close = PreCloseAlert()
         self.referral_system = ReferralSystem()
         self.weekly_reporter = None  # يتظهر بعد ما bot يتعمل
@@ -1829,7 +1830,8 @@ class CandleHunterSignalBot:
 
         async def post_init(app):
             # لا إرسال رسالة بدء في القناة
-            asyncio.create_task(run_scheduler(app))
+            # Store reference to prevent garbage collection
+            self._scheduler_task = asyncio.create_task(run_scheduler(app))
 
         app.post_init = post_init
 
