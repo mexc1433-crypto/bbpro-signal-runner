@@ -156,3 +156,10 @@ TIMEZONE = os.getenv("TIMEZONE", "Africa/Cairo")
 # ═══════════════════════════════════════════════════════════════
 FEAR_GREED_API = "https://api.alternative.me/fng/?limit=1"
 VIX_SYMBOL = "^VIX"  # مؤشر التذبذب - يعكس الخوف في السوق
+
+# ═══════════════════════════════════════════════════════════════
+# Advanced Features Configuration
+# ═══════════════════════════════════════════════════════════════
+MIN_MEXC_BALANCE = float(os.getenv("MIN_MEXC_BALANCE", "10"))
+SIGNAL_COOLDOWN_MINUTES = int(os.getenv("SIGNAL_COOLDOWN_MINUTES", "30"))
+MAX_SPREAD_PCT = float(os.getenv("MAX_SPREAD_PCT", "0.15"))

@@ -475,6 +475,10 @@ class SignalTracker:
 
         return msg
 
+    def get_pending_signals(self) -> List[Dict]:
+        """جلب كل الإشارات المعلقة — للـ pre-close alerts"""
+        return [s for s in self.signals if s.get("status") == "PENDING"]
+
     def cleanup_old_signals(self, days: int = 30):
         """حذف الإشارات الأقدم من N يوم"""
         cutoff = datetime.now() - timedelta(days=days)

@@ -97,6 +97,17 @@ def format_signal_message(signal: Dict, capital_plans: List[Dict],
         aligned = "✅ مع الترند" if signal.get("trend_aligned") else "⚠️ ترند محايد"
         msg += f"{trend_emoji} الترند: {signal['trend']} — {aligned}\n"
 
+    # Fear & Greed badge
+    if signal.get("fear_greed") is not None:
+        fg = signal["fear_greed"]
+        fg_label = signal.get("fear_greed_label", "")
+        msg += f"😱 الخوف والطمع: {fg} ({fg_label})\n"
+
+    # DXY badge
+    if signal.get("dxy_trend") and signal["dxy_trend"] != "UNKNOWN":
+        dxy_change = signal.get("dxy_change", 0)
+        msg += f"💵 الدولار: {signal['dxy_trend']} ({dxy_change:+.2f}%)\n"
+
     msg += "\n"
     msg += f"📅 {signal.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M'))}\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -128,6 +139,11 @@ def format_analysis_message(analysis: Dict) -> str:
 
     if analysis.get("silver_price"):
         msg += f"🥈 الفضة: ${analysis['silver_price']:,.2f}\n"
+
+    if analysis.get("fear_greed") is not None:
+        fg = analysis["fear_greed"]
+        fg_label = "خوف شديد" if fg < 25 else "خوف" if fg < 45 else "محايد" if fg < 55 else "طمع" if fg < 75 else "طمع شديد"
+        msg += f"😱 الخوف والطمع: {fg} ({fg_label})\n"
 
     if analysis.get("fear_greed") is not None:
         fg = analysis["fear_greed"]

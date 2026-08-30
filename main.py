@@ -63,6 +63,14 @@ from confluence import ConfluenceAnalyzer
 from enhanced_confluence import EnhancedConfluence
 from signal_filters import VolatilityFilter, ActiveHoursFilter, TrendFilter
 from price_alerts import PriceAlertManager
+from advanced_features import (
+    BalanceChecker, SmartPositionSizer, ConflictResolver,
+    FearGreedIndex, DXYFilter, SpreadFilter,
+    SignalCooldown, MarketHoursManager, AutoRestartManager,
+)
+from weekly_report import WeeklyReporter
+from referral_system import ReferralSystem
+from pre_close_alert import PreCloseAlert
 from user_manager import UserManager, Encryption
 from auto_trader import AutoTrader
 from signal_forwarder import SignalForwarder
@@ -106,6 +114,20 @@ class CandleHunterSignalBot:
         self.trend_filter = TrendFilter(self.fetcher)
         self.price_alerts = PriceAlertManager()
         self.broadcast_state = {}  # for broadcast feature
+
+        # ===== Advanced Features =====
+        self.balance_checker = BalanceChecker(self.auto_trader)
+        self.position_sizer = SmartPositionSizer()
+        self.conflict_resolver = ConflictResolver()
+        self.fear_greed = FearGreedIndex()
+        self.dxy_filter = DXYFilter(self.fetcher)
+        self.spread_filter = SpreadFilter(self.fetcher)
+        self.cooldown = SignalCooldown()
+        self.market_hours = MarketHoursManager()
+        self.auto_restart = AutoRestartManager()
+        self.pre_close = PreCloseAlert()
+        self.referral_system = ReferralSystem()
+        self.weekly_reporter = None  # يتظهر بعد ما bot يتعمل
         self.user_manager = UserManager()
 
         # Auto-trader (سيتم تهيئته بعد قراءة env vars)
@@ -152,6 +174,8 @@ class CandleHunterSignalBot:
             [InlineKeyboardButton("🔬 تحليل 20 مؤشر", callback_data="scan_pro")],
             [InlineKeyboardButton("📈 الإحصائيات", callback_data="stats"),
              InlineKeyboardButton("🔔 تنبيه سعر", callback_data="price_alerts")],
+            [InlineKeyboardButton("👥 الإحالة", callback_data="referral"),
+             InlineKeyboardButton("🕒 حالة السوق", callback_data="market_status")],
             [InlineKeyboardButton("📅 الأحداث الاقتصادية", callback_data="calendar"),
              InlineKeyboardButton("🔍 تحليل السوق", callback_data="analysis")],
         ]
@@ -214,6 +238,8 @@ class CandleHunterSignalBot:
         buttons = [
             [InlineKeyboardButton("📡 مسح السوق", callback_data="scan"),
              InlineKeyboardButton("📊 حالتي", callback_data="myaccount")],
+            [InlineKeyboardButton("👥 الإحالة", callback_data="referral"),
+             InlineKeyboardButton("🔔 تنبيه سعر", callback_data="price_alerts")],
             [InlineKeyboardButton("⚙️ الإعدادات", callback_data="settings"),
              InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")],
         ]
@@ -256,6 +282,32 @@ class CandleHunterSignalBot:
                         )
                     except Exception as e:
                         logger.warning(f"Failed to send price alert: {e}")
+
+                # ⏰ FEATURE 7: Pre-Close Alerts — تنبيه قبل TP/SL بـ 5 دقايق
+                try:
+                    pending = self.tracker.get_pending_signals()
+                    self.pre_close.check_signals(pending, ticker["last"], self.bot)
+                except Exception as e:
+                    logger.warning(f"Pre-close check failed: {e}")
+
+                # 📊 FEATURE 4: Weekly Report — جمعة 8م
+                try:
+                    if not self.weekly_reporter:
+                        self.weekly_reporter = WeeklyReporter(
+                            self.tracker, self.bot, self.private_channel, self.admin_id
+                        )
+                    if self.weekly_reporter.should_run_now():
+                        await self.weekly_reporter.send_weekly_report()
+                except Exception as e:
+                    logger.warning(f"Weekly report check failed: {e}")
+
+                # 🔄 FEATURE 13: Auto-Restart health check
+                try:
+                    if not self.auto_restart.is_healthy():
+                        logger.error("🔄 Bot unhealthy — attempting restart")
+                        self.auto_restart.record_restart()
+                except Exception:
+                    pass
         except Exception as e:
             logger.warning(f"Signal tracking check failed: {e}")
 
@@ -433,6 +485,30 @@ class CandleHunterSignalBot:
 
     async def process_signals(self, signals: List[Dict]):
         """يوزع الإشارات على القنوات المناسبة — مع فلترة وتأكيد"""
+
+        # 🌙 FEATURE 12: Market Hours — لو السوق مقفول ما تبعتش
+        if not self.market_hours.is_market_open():
+            mkt = self.market_hours.get_market_status()
+            logger.info(f"🌙 Market closed: {mkt['status']} — no signals sent")
+            return
+
+        # ⏱️ SIGNAL COOLDOWN: لو في كولداون ما تبعتش
+        if not self.cooldown.can_send():
+            remaining = self.cooldown.get_remaining()
+            logger.info(f"⏱️ Cooldown active: {remaining:.0f} min remaining — skipping signals")
+            return
+
+        # 📏 FEATURE 14: Spread Filter — لو السبريد كبير ما تفتحش صفقة
+        spread = self.spread_filter.check_spread()
+        if not spread.get("ok"):
+            logger.warning(f"📏 Spread too wide: {spread['reason']} — skipping")
+            return
+
+        # ⚔️ FEATURE 8: Conflict Resolution — اختار الأعلى ثقة لو فيه تعارض
+        signals = self.conflict_resolver.resolve(signals)
+        if not signals:
+            logger.info("📊 No signals after conflict resolution")
+            return
         # تحسين الإشارات بالتطابق المحسّن (20 مؤشر على 5 أطر زمنية)
         try:
             enhanced_data = self.enhanced_confluence.analyze(["5m", "15m", "1h", "4h", "1d"])
@@ -454,6 +530,14 @@ class CandleHunterSignalBot:
                     logger.info(f"Legacy Confluence: {confluence_data['confluence_level']} (+{confluence_data['confidence_boost']}%)")
             except Exception as e2:
                 logger.warning(f"Legacy confluence also failed: {e2}")
+
+        # 😱 FEATURE 9: Fear & Greed Index — تعديل ثقة الإشارات
+        for signal in signals:
+            self.fear_greed.should_adjust_confidence(signal)
+
+        # 💵 FEATURE 10: DXY Correlation — تعديل حسب قوة الدولار
+        for signal in signals:
+            self.dxy_filter.apply(signal)
 
         # 🎯 FEATURE 2: Multi-Signal Confirmation — لازم استراتيجيتين توافقوا على نفس الاتجاه
         direction_counts = {}
@@ -515,20 +599,51 @@ class CandleHunterSignalBot:
                     self.channel_manager.record_signal(channel, signal)
                     self.signal_history.append({**signal, "channel": channel})
                     sent_directions.add(sig_dir)
+                    # ⏱️ Record cooldown
+                    self.cooldown.record_signal()
                     await asyncio.sleep(2)
                 except Exception as e:
                     logger.error(f"Error sending to {channel}: {e}")
 
-        # 📡 إرسال الإشارة لبوت التداول التلقائي (عبر HTTP API)
+        # 💰 FEATURE 3: Balance Check قبل تنفيذ الصفقة
         if filtered_signals:
-            try:
-                forward_result = await self.forwarder.forward_signal(filtered_signals[0])
-                if forward_result.get("success"):
-                    logger.info(f"📡 Signal forwarded to trade bot successfully")
-                else:
-                    logger.warning(f"⚠️ Forward failed: {forward_result.get('error', 'unknown')}")
-            except Exception as e:
-                logger.error(f"Signal forward error: {e}")
+            bal = self.balance_checker.check_owner_balance()
+            if not bal.get("ok"):
+                logger.warning(f"💰 Skipping auto-trade: {bal['reason']}")
+                # إرسال تنبيه للأدمن
+                try:
+                    await self.bot.send_message(
+                        chat_id=self.admin_id,
+                        text=f"⚠️ رصيد MEXC غير كافي\n\n"
+                             f"الرصيد: ${bal.get('balance', 0):.2f}\n"
+                             f"الحد الأدنى: ${self.balance_checker.min_balance:.2f}\n"
+                             f"الإشارة لم تُنفذ تلقائياً"
+                    )
+                except Exception:
+                    pass
+            else:
+                # 📐 FEATURE 6: Smart Position Sizing — تعديل حجم الصفقة
+                for sig in filtered_signals:
+                    sizing = self.position_sizer.calculate_size(
+                        bal["balance"],
+                        sig.get("confidence", 50),
+                        sig.get("entry_price", 0),
+                        sig.get("stop_loss", 0),
+                    )
+                    if sizing.get("ok"):
+                        sig["smart_amount"] = sizing["amount"]
+                        sig["smart_risk_pct"] = sizing["risk_pct"]
+                        logger.info(f"📐 Smart sizing: {sizing['amount']} (risk={sizing['risk_pct']}%)")
+
+                # 📡 إرسال الإشارة لبوت التداول التلقائي (عبر HTTP API)
+                try:
+                    forward_result = await self.forwarder.forward_signal(filtered_signals[0])
+                    if forward_result.get("success"):
+                        logger.info(f"📡 Signal forwarded to trade bot successfully")
+                    else:
+                        logger.warning(f"⚠️ Forward failed: {forward_result.get('error', 'unknown')}")
+                except Exception as e:
+                    logger.error(f"Signal forward error: {e}")
 
     def _format_user_notification(self, signal: Dict, result: Dict) -> str:
         """إشعار المستخدم بتنفيذ صفقة على حسابه"""
@@ -1161,6 +1276,41 @@ class CandleHunterSignalBot:
                 "⬇️ below = تنبيه لما السعر ينزل تحت الرقم"
             )
 
+        elif data == "referral":
+            bot_username = (await self.bot.get_me()).username
+            ref_msg = self.referral_system.format_referral_info(user_id, bot_username)
+            keyboard = [
+                [InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")],
+            ]
+            await query.edit_message_text(
+                ref_msg,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
+        elif data == "market_status":
+            mkt = self.market_hours.get_market_status()
+            status_emoji = "🟢" if mkt["open"] else "🔴"
+            cooldown_remaining = self.cooldown.get_remaining()
+            uptime = self.auto_restart.get_uptime()
+
+            msg = f"🕒 حالة السوق\n"
+            msg += "━━━━━━━━━━━━━━━━━━━━\n"
+            msg += f"{status_emoji} السوق: {mkt['status']}\n"
+            msg += f"⏰ الإغلاق القادم: {mkt.get('next_close', '—')}\n"
+            msg += f"🔓 الفتح القادم: {mkt.get('next_open', '—')}\n\n"
+            msg += f"⏱️ كولداون الإشارات: {cooldown_remaining:.0f} دقيقة\n"
+            msg += f"🔄 زمن التشغيل: {uptime}\n"
+            msg += f"🔄 إعادات التشغيل: {self.auto_restart.restart_count}\n\n"
+            msg += "🤖 صياد الشمعات | Candle Hunter"
+
+            keyboard = [
+                [InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")],
+            ]
+            await query.edit_message_text(
+                msg,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
         elif data == "admin_broadcast":
             if user_id != self.admin_id:
                 await query.edit_message_text("❌ غير مصرح")
@@ -1519,6 +1669,15 @@ class CandleHunterSignalBot:
         logger.info(f"📡 Private Channel: {'✅' if self.private_channel else '❌'}")
         logger.info(f"🤖 Auto-Trade: {'✅' if self.auto_trader.owner_client else '❌'}")
         logger.info(f"👥 Users: {self.user_manager.get_stats()['total']}")
+        logger.info(f"⏱️ Signal Cooldown: {self.cooldown.cooldown_minutes} min")
+        logger.info(f"📏 Spread Filter: max {self.spread_filter.max_spread_pct}%")
+        logger.info(f"😱 Fear & Greed: ✅")
+        logger.info(f"💵 DXY Filter: ✅")
+        logger.info(f"📊 Weekly Report: ✅ (Friday 8PM)")
+        logger.info(f"👥 Referral System: ✅")
+        logger.info(f"📐 Smart Sizing: ✅")
+        logger.info(f"⏰ Pre-Close Alerts: ✅")
+        logger.info(f"🔄 Auto-Restart: ✅")
         logger.info("=" * 60)
 
         # Setup schedules
