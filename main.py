@@ -1725,6 +1725,9 @@ class CandleHunterSignalBot:
         logger.info(f"📐 Smart Sizing: ✅")
         logger.info(f"⏰ Pre-Close Alerts: ✅")
         logger.info(f"🔄 Auto-Restart: ✅")
+        logger.info(f"🤖 AI News Sentiment: ✅ (Groq + Finnhub)")
+        logger.info(f"🥇 GoldAPI Spot: ✅ (LBMA)")
+        logger.info(f"💰 FMP Gold Futures: ✅")
         logger.info("=" * 60)
 
         # Setup schedules
