@@ -63,6 +63,7 @@ from confluence import ConfluenceAnalyzer
 from enhanced_confluence import EnhancedConfluence
 from signal_filters import VolatilityFilter, ActiveHoursFilter, TrendFilter
 from price_alerts import PriceAlertManager
+from smc_analyzer import SMCAnalyzer
 from advanced_features import (
     BalanceChecker, SmartPositionSizer, ConflictResolver,
     FearGreedIndex, DXYFilter, SpreadFilter,
