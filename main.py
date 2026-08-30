@@ -1770,7 +1770,7 @@ class CandleHunterSignalBot:
             logger.error("No channel IDs set! Check .env file")
             sys.exit(1)
 
-        logger.info("=" * 60)
+        logger.info("━" * 40)
         logger.info("🚀 صياد الشمعات | Candle Hunter Starting...")
         logger.info("📊 Symbol: XAU/USD (Gold)")
         logger.info(f"📈 Strategies: 13")
@@ -1794,7 +1794,7 @@ class CandleHunterSignalBot:
         logger.info(f"🔔 OCO Order Management: ✅")
         logger.info(f"🧠 SMC + Order Flow: ✅ (VWAP/OB/FVG/VP/ADX)")
         logger.info(f"📊 MTF Confluence: ✅ (4h/1h/15m/5m + OBV/Fib/HA)")
-        logger.info("=" * 60)
+        logger.info("━" * 40)
 
         # Setup Telegram commands
         app = Application.builder().token(BOT_TOKEN).build()
@@ -1823,7 +1823,7 @@ class CandleHunterSignalBot:
 
         # Setup schedules using PTB JobQueue (native async, no GC issues)
         if app.job_queue:
-            app.job_queue.run_repeating(self._job_scalping, interval=900, first=60)     # 15 min (first=60s for test)
+            app.job_queue.run_repeating(self._job_scalping, interval=900, first=120)    # 15 min (first=2min)
             app.job_queue.run_repeating(self._job_medium, interval=3600, first=3600)    # 60 min
             app.job_queue.run_repeating(self._job_swing, interval=14400, first=14400)  # 4 hours
             app.job_queue.run_repeating(self._job_news_check, interval=600, first=600) # 10 min
@@ -1867,6 +1867,26 @@ class CandleHunterSignalBot:
         app.add_error_handler(error_handler)
 
         logger.info("Bot is running! Press Ctrl+C to stop.")
+        # Start health check server for Railway
+        import threading
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        
+        class HealthHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok","bot":"candle-hunter"}')
+            def log_message(self, format, *args):
+                pass
+        
+        def start_health_server():
+            server = HTTPServer(('0.0.0.0', int(os.environ.get('PORT', 8080))), HealthHandler)
+            server.serve_forever()
+        
+        threading.Thread(target=start_health_server, daemon=True).start()
+        logger.info(f"✅ Health endpoint on port {os.environ.get('PORT', 8080)}")
+        
         app.run_polling(stop_signals=None)
 
 
