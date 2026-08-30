@@ -23,7 +23,7 @@ class MexcClient:
     """عميل MEXC للتنفيذ التلقائي والتحقق من الإحالات"""
 
     # XAU/USDT perpetual on MEXC
-    GOLD_SYMBOL = "XAUUSDT"
+    GOLD_SYMBOL = "XAU/USDT:USDT"
     GOLD_SYMBOL_SPOT = "XAUUSDT"
 
     def __init__(self, api_key: str = "", api_secret: str = "", is_futures: bool = True):
