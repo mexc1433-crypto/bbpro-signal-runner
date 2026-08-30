@@ -311,13 +311,7 @@ class CandleHunterSignalBot:
         except Exception as e:
             logger.warning(f"Signal tracking check failed: {e}")
 
-        # 🚫 فلتر الويك إند — سوق الذهب الحقيقي مقفول السبت والأحد
-        today = datetime.now()
-        weekday = today.weekday()  # 0=Monday, 5=Saturday, 6=Sunday
-        if weekday >= 5:
-            logger.info(f"🚫 Weekend filter: market closed (day={weekday}). No signals.")
-            return all_signals
-
+        # 🌙 Market Hours — تم نقله لـ process_signals (MarketHoursManager)
         # 🛑 FEATURE 6: Daily Drawdown Limit — إيقاف بعد 3 خسائر أو 5% drawdown
         should_stop, stop_reason = self.tracker.should_pause_trading()
         if should_stop:
@@ -1535,8 +1529,8 @@ class CandleHunterSignalBot:
             return
 
         # لا ترسل ملخص في الويك إند
-        if datetime.now().weekday() >= 5:
-            logger.info("📊 Daily summary skipped — weekend")
+        if not self.market_hours.is_market_open():
+            logger.info("📊 Daily summary skipped — market closed")
             return
         try:
             # تقرير الإحصائيات التفصيلي
