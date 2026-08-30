@@ -86,28 +86,59 @@ def groq_analyze_news(headlines: List[str], summaries: List[str] = None) -> Dict
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.3,
-            "max_tokens": 400
+            "max_tokens": 800
         }
         
         resp = requests.post(url, json=payload, headers=headers, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         
-        content = data["choices"][0]["message"]["content"].strip()
+        msg = data["choices"][0]["message"]
+        content = msg.get("content", "").strip()
+        
+        # لو content فاضي، نستخدم reasoning
+        if not content:
+            content = msg.get("reasoning", "").strip()
+        
+        if not content:
+            raise ValueError("Empty response from Groq")
         
         # تنظيف الـ JSON
         if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
+            content = content.split("```json")[1].split("```")[0].strip()
         elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
+            parts = content.split("```")
+            if len(parts) >= 2:
+                content = parts[1].strip()
         
         # استخراج JSON من النص لو فيه نص زائد
-        if "{" in content:
+        if "{" in content and "}" in content:
             start = content.index("{")
             end = content.rindex("}") + 1
             content = content[start:end]
+        elif "{" in content:
+            # JSON ناقص — نضيف القوس
+            start = content.index("{")
+            content = content[start:] + "}"
         
-        result = json.loads(content.strip())
+        try:
+            result = json.loads(content.strip())
+        except json.JSONDecodeError:
+            # JSON مقطوع — نحمل الـ summary والـ sentiment يدوياً
+            import re
+            sentiment_match = re.search(r'"gold_sentiment"\s*:\s*"([^"]+)"', content)
+            confidence_match = re.search(r'"confidence"\s*:\s*(\d+)', content)
+            summary_match = re.search(r'"summary_ar"\s*:\s*"([^"]*)"', content)
+            rec_match = re.search(r'"recommendation"\s*:\s*"([^"]+)"', content)
+            result = {
+                "gold_sentiment": sentiment_match.group(1) if sentiment_match else "neutral",
+                "confidence": int(confidence_match.group(1)) if confidence_match else 50,
+                "impact_level": "medium",
+                "summary_ar": summary_match.group(1) if summary_match else "",
+                "recommendation": rec_match.group(1) if rec_match else "wait",
+                "key_factors": []
+            }
+        
         result["analyzed_at"] = datetime.now().isoformat()
         
         logger.info(f"🤖 Groq AI: sentiment={result.get('gold_sentiment')}, confidence={result.get('confidence')}%")
@@ -150,7 +181,7 @@ def groq_daily_gold_brief(news_list: List[Dict]) -> str:
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.4,
-            "max_tokens": 600
+            "max_tokens": 800
         }
         
         resp = requests.post(url, json=payload, headers=headers, timeout=30)
