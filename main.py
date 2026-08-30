@@ -1714,7 +1714,11 @@ class CandleHunterSignalBot:
         await self.send_daily_summary()
 
     async def _job_news_check(self, context=None):
-        await self.check_news_alerts()
+        logger.info("⏰ News check triggered")
+        try:
+            await self.check_news_alerts()
+        except Exception as e:
+            logger.error(f"News check job error: {e}")
 
     # Legacy sync wrappers (fallback)
     def scheduled_scalping(self):
@@ -1819,7 +1823,7 @@ class CandleHunterSignalBot:
 
         # Setup schedules using PTB JobQueue (native async, no GC issues)
         if app.job_queue:
-            app.job_queue.run_repeating(self._job_scalping, interval=900, first=900)     # 15 min
+            app.job_queue.run_repeating(self._job_scalping, interval=900, first=60)     # 15 min (first=60s for test)
             app.job_queue.run_repeating(self._job_medium, interval=3600, first=3600)    # 60 min
             app.job_queue.run_repeating(self._job_swing, interval=14400, first=14400)  # 4 hours
             app.job_queue.run_repeating(self._job_news_check, interval=600, first=600) # 10 min
