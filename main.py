@@ -533,6 +533,33 @@ class CandleHunterSignalBot:
         for signal in signals:
             self.dxy_filter.apply(signal)
 
+        # 🤖 FEATURE 15: AI News Sentiment — Groq AI تحليل الأخبار
+        ai_adjustment = 0
+        if not hasattr(self, '_last_ai_check') or (datetime.now() - self._last_ai_check).total_seconds() > 3600:
+            try:
+                news = finnhub_news(limit=10)
+                if news:
+                    headlines = [n["headline"] for n in news[:8]]
+                    summaries = [n.get("summary", "") for n in news[:8]]
+                    ai_result = groq_analyze_news(headlines, summaries)
+                    self._last_ai_check = datetime.now()
+                    self._last_ai_sentiment = ai_result
+                    logger.info(f"🤖 AI Sentiment: {ai_result.get('gold_sentiment')} ({ai_result.get('confidence')}%) — {ai_result.get('summary_ar','')[:50]}")
+            except Exception as e:
+                logger.warning(f"AI sentiment check failed: {e}")
+        
+        # Apply AI adjustment to each signal
+        ai_result = getattr(self, '_last_ai_sentiment', {})
+        if ai_result and ai_result.get("gold_sentiment") != "neutral":
+            for signal in signals:
+                sig_dir = signal.get("signal_type", "").upper()
+                is_buy = "BUY" in sig_dir or "LONG" in sig_dir
+                ai_adj = get_confidence_adjustment(ai_result, "buy" if is_buy else "sell")
+                if ai_adj != 0:
+                    old_conf = signal.get("confidence", 50)
+                    signal["confidence"] = max(0, min(100, old_conf + ai_adj))
+                    logger.info(f"🤖 AI adjusted signal {sig_dir}: {old_conf:.0f} → {signal['confidence']:.0f} ({ai_adj:+.1f})")
+
         # 🎯 FEATURE 2: Multi-Signal Confirmation — لازم استراتيجيتين توافقوا على نفس الاتجاه
         direction_counts = {}
         for s in signals:
@@ -907,13 +934,39 @@ class CandleHunterSignalBot:
             await update.message.reply_text("⚠️ لا توجد إشارات في الوقت الحالي")
 
     async def cmd_analysis(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """أمر /analysis"""
+        """📊 تقرير شامل للذهب من كل الـ APIs"""
         user_id = update.effective_user.id
         if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
             await update.message.reply_text("❌ لازم تسجل أول مرة. اكتب /start")
             return
-        await update.message.reply_text("📊 جاري تحليل السوق...")
-        await self.send_market_analysis()
+        msg = await update.message.reply_text("📊 جاري جمع البيانات من كل المصادر...")
+        try:
+            ctx = get_enhanced_market_context()
+            report = format_gold_report(ctx)
+            news = ctx.get("news", [])
+            if news:
+                report += f"\n📰 آخر الأخبار ({len(news)} خبر):\n"
+                for n in news[:5]:
+                    report += f"  • {n['headline'][:70]}\n"
+            await msg.edit_text(report)
+        except Exception as e:
+            await msg.edit_text(f"❌ خطأ: {e}")
+
+    async def cmd_daily_brief(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """🤖 ملخص يومي ذكي بالعربي"""
+        user_id = update.effective_user.id
+        if not self._is_admin(user_id):
+            return
+        msg = await update.message.reply_text("🤖 جاري تحليل الأخبار و توليد الملخص اليومي...")
+        try:
+            news = finnhub_news(limit=15)
+            if not news:
+                await msg.edit_text("❌ لا توجد أخبار متاحة حالياً")
+                return
+            brief = groq_daily_gold_brief(news)
+            await msg.edit_text(f"📋 الملخص اليومي للذهب\n\n{brief}")
+        except Exception as e:
+            await msg.edit_text(f"❌ خطأ: {e}")
 
     async def cmd_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """أمر /summary"""
@@ -1692,6 +1745,7 @@ class CandleHunterSignalBot:
         app.add_handler(CommandHandler("help", self.cmd_help))
         app.add_handler(CommandHandler("status", self.cmd_status))
         app.add_handler(CommandHandler("scan", self.cmd_scan))
+        app.add_handler(CommandHandler("brief", self.cmd_daily_brief))
         app.add_handler(CommandHandler("analysis", self.cmd_analysis))
         app.add_handler(CommandHandler("summary", self.cmd_summary))
         app.add_handler(CommandHandler("performance", self.cmd_performance))
