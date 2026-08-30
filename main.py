@@ -113,6 +113,7 @@ class CandleHunterSignalBot:
         self.active_hours_filter = ActiveHoursFilter()
         self.trend_filter = TrendFilter(self.fetcher)
         self.price_alerts = PriceAlertManager()
+        self.smc = SMCAnalyzer()
         self.broadcast_state = {}  # for broadcast feature
 
         # ===== Advanced Features (non-dependent on auto_trader) =====
@@ -1282,6 +1283,18 @@ class CandleHunterSignalBot:
         elif data == "status":
             await self.cmd_status(update, context)
 
+        elif data == "smc_analysis":
+            try:
+                df = await self.fetcher.fetch_ohlcv("1h", limit=200)
+                if df is not None and len(df) > 20:
+                    smc_data = self.smc.analyze_all(df, "1h")
+                    report = self.smc.format_smc_report(smc_data)
+                    await query.edit_message_text(report)
+                else:
+                    await query.edit_message_text("⚠️ مفيش بيانات كافية")
+            except Exception as e:
+                await query.edit_message_text(f"⚠️ خطأ: {e}")
+
         elif data == "analysis":
             await query.edit_message_text("📊 جاري تحليل السوق...")
             await self.send_market_analysis()
@@ -1747,6 +1760,7 @@ class CandleHunterSignalBot:
         logger.info(f"🥇 GoldAPI Spot: ✅ (LBMA)")
         logger.info(f"💰 FMP Gold Futures: ✅")
         logger.info(f"🔔 OCO Order Management: ✅")
+        logger.info(f"🧠 SMC + Order Flow: ✅ (VWAP/OB/FVG/VP/ADX)")
         logger.info("=" * 60)
 
         # Setup schedules
