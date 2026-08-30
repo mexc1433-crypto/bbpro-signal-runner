@@ -94,16 +94,19 @@ class MarketDataFetcher:
 
         mexc_tf = MEXC_TIMEFRAMES.get(timeframe, "1h")
         
+        # Try with higher limit for low-timeframe issues
+        fetch_limit = max(limit, 250)
+        
         for attempt in range(3):
             try:
                 ohlcv = self._exchange.fetch_ohlcv(
                     self.mexc_symbol,
                     timeframe=mexc_tf,
-                    limit=limit
+                    limit=fetch_limit
                 )
                 
                 if not ohlcv or len(ohlcv) < 20:
-                    logger.warning(f"MEXC: not enough data for {mexc_tf} ({len(ohlcv) if ohlcv else 0} candles)")
+                    logger.debug(f"MEXC: not enough data for {mexc_tf} ({len(ohlcv) if ohlcv else 0} candles) — will try fallback")
                     return pd.DataFrame()
 
                 # Build DataFrame
@@ -243,16 +246,16 @@ class MarketDataFetcher:
                     'change_pct': float(change_pct),
                 }
             except Exception as e:
-                logger.warning(f"MEXC ticker error: {e}")
+                logger.debug(f"MEXC ticker error: {e}")
                 
                 # Fallback: use last OHLCV candle as ticker
                 try:
-                    df = self._mexc_fetch_ohlcv("1m", 2)
+                    df = self._mexc_fetch_ohlcv("5m", 5)
                     if df is not None and not df.empty and len(df) >= 2:
                         last_price = float(df["close"].iloc[-1])
                         prev_price = float(df["close"].iloc[-2])
                         change_pct = ((last_price - prev_price) / prev_price * 100) if prev_price else 0
-                        logger.info(f"MEXC ticker via OHLCV: ${last_price:.2f}")
+                        logger.info(f"MEXC ticker via OHLCV fallback: ${last_price:.2f}")
                         return {
                             "symbol": self.display_name,
                             "last": last_price,

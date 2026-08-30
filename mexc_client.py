@@ -75,7 +75,10 @@ class MexcClient:
     def get_positions(self) -> List[Dict]:
         """جلب الصفقات المفتوحة"""
         try:
-            positions = self.exchange.fetch_positions([self.GOLD_SYMBOL])
+            try:
+                positions = self.exchange.fetch_positions([self.GOLD_SYMBOL])
+            except Exception:
+                positions = self.exchange.fetch_positions()
             return [
                 {
                     "symbol": p.get("symbol", ""),
@@ -89,7 +92,7 @@ class MexcClient:
                 if float(p.get("contracts", 0)) > 0
             ]
         except Exception as e:
-            logger.error(f"Error fetching positions: {e}")
+            logger.debug(f"No positions (likely empty account): {e}")
             return []
 
     def get_ticker(self) -> Optional[Dict]:
@@ -259,7 +262,13 @@ class MexcClient:
     def get_open_orders(self) -> List[Dict]:
         """جلب كل الأوامر المعلقة على الذهب"""
         try:
-            orders = self.exchange.fetch_open_orders(self.GOLD_SYMBOL)
+            try:
+                orders = self.exchange.fetch_open_orders(self.GOLD_SYMBOL)
+            except Exception:
+                try:
+                    orders = self.exchange.fetch_open_orders()
+                except Exception:
+                    return []
             return orders
         except Exception as e:
             logger.warning(f"Get open orders error: {e}")
