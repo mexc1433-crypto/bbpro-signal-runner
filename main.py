@@ -1791,25 +1791,6 @@ class CandleHunterSignalBot:
         logger.info(f"📊 MTF Confluence: ✅ (4h/1h/15m/5m + OBV/Fib/HA)")
         logger.info("=" * 60)
 
-        # Setup schedules using PTB JobQueue (native async, no GC issues)
-        if app.job_queue:
-            app.job_queue.run_repeating(self._job_scalping, interval=900, first=900)     # 15 min
-            app.job_queue.run_repeating(self._job_medium, interval=3600, first=3600)    # 60 min
-            app.job_queue.run_repeating(self._job_swing, interval=14400, first=14400)  # 4 hours
-            app.job_queue.run_repeating(self._job_news_check, interval=600, first=600) # 10 min
-            app.job_queue.run_repeating(self._job_analysis, interval=21600, first=21600) # 6 hours
-            app.job_queue.run_daily(callback=self._job_summary, time=time(hour=23, minute=0))  # 23:00 daily
-            logger.info("✅ JobQueue scheduled: scalping(15m), medium(60m), swing(4h), news(10m), analysis(6h), summary(23:00)")
-        else:
-            logger.error("❌ JobQueue not available! Fallback to schedule library")
-            import schedule
-            schedule.every(15).minutes.do(self.scheduled_scalping)
-            schedule.every(60).minutes.do(self.scheduled_medium)
-            schedule.every(4).hours.do(self.scheduled_swing)
-            schedule.every(10).minutes.do(self.scheduled_news_check)
-            schedule.every(6).hours.do(self.scheduled_analysis)
-            schedule.every().day.at("23:00").do(self.scheduled_summary)
-
         # Setup Telegram commands
         app = Application.builder().token(BOT_TOKEN).build()
         self._app = app
@@ -1834,6 +1815,18 @@ class CandleHunterSignalBot:
 
         # Text message handler (للتسجيل)
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_message))
+
+        # Setup schedules using PTB JobQueue (native async, no GC issues)
+        if app.job_queue:
+            app.job_queue.run_repeating(self._job_scalping, interval=900, first=900)     # 15 min
+            app.job_queue.run_repeating(self._job_medium, interval=3600, first=3600)    # 60 min
+            app.job_queue.run_repeating(self._job_swing, interval=14400, first=14400)  # 4 hours
+            app.job_queue.run_repeating(self._job_news_check, interval=600, first=600) # 10 min
+            app.job_queue.run_repeating(self._job_analysis, interval=21600, first=21600) # 6 hours
+            app.job_queue.run_daily(callback=self._job_summary, time=time(hour=23, minute=0))  # 23:00 daily
+            logger.info("✅ JobQueue scheduled: scalping(15m), medium(60m), swing(4h), news(10m), analysis(6h), summary(23:00)")
+        else:
+            logger.error("❌ JobQueue not available!")
 
         # Run scheduler in background
         async def run_scheduler(app):
