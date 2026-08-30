@@ -301,6 +301,24 @@ class CandleHunterSignalBot:
                 except Exception as e:
                     logger.warning(f"Weekly report check failed: {e}")
 
+                # 🤖 FEATURE 16: OCO Order Management — كل دقيقة
+                if not hasattr(self, '_last_oco_check') or (datetime.now() - self._last_oco_check).total_seconds() >= 60:
+                    try:
+                        oco_result = await self.auto_trader.check_oco_all()
+                        if oco_result.get("owner", {}).get("position_closed"):
+                            exit_price = oco_result["owner"].get("exit_price", 0)
+                            logger.info(f"🔔 OCO: Owner position closed at ${exit_price:.2f} — orders cleaned up")
+                            try:
+                                await self.app.bot.send_message(
+                                    chat_id=ADMIN_ID,
+                                    text=f"🔔 OCO: تم إغلاق الصفقة على حسابك عند ${exit_price:.2f}\nتم إلغاء كل الأوامر المعلقة."
+                                )
+                            except:
+                                pass
+                    except Exception as e:
+                        logger.warning(f"OCO check error: {e}")
+                    self._last_oco_check = datetime.now()
+
                 # 🔄 FEATURE 13: Auto-Restart health check
                 try:
                     if not self.auto_restart.is_healthy():
@@ -1728,6 +1746,7 @@ class CandleHunterSignalBot:
         logger.info(f"🤖 AI News Sentiment: ✅ (Groq + Finnhub)")
         logger.info(f"🥇 GoldAPI Spot: ✅ (LBMA)")
         logger.info(f"💰 FMP Gold Futures: ✅")
+        logger.info(f"🔔 OCO Order Management: ✅")
         logger.info("=" * 60)
 
         # Setup schedules

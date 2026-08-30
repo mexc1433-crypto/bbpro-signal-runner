@@ -204,6 +204,86 @@ class AutoTrader:
             logger.error(f"Close all for user error: {e}")
             return {"success": False, "error": str(e)}
 
+    async def check_oco_for_owner(self) -> Dict:
+        """
+        فحص OCO لحساب المالك:
+        لو الصفقة اتقفلت (TP أو SL ضرب) نلغي الأوامر المعرفة
+        ونبعت إشعار بالنتيجة
+        """
+        if not self.owner_client:
+            return {"error": "No owner client"}
+
+        result = self.owner_client.check_and_cleanup_oco()
+        
+        if result.get("position_closed"):
+            exit_price = result.get("exit_price", 0)
+            exit_side = result.get("exit_side", "")
+            logger.info(f"🔔 OCO Owner: Position closed at ${exit_price:.2f}")
+            
+            # إشعار بالنتيجة
+            if not hasattr(self, '_pending_notifications'):
+                self._pending_notifications = {}
+            self._pending_notifications["owner_oco"] = {
+                "type": "oco_close",
+                "exit_price": exit_price,
+                "exit_side": exit_side,
+                "timestamp": datetime.now().isoformat(),
+            }
+        
+        return result
+
+    async def check_oco_for_user(self, telegram_id: int) -> Dict:
+        """فحص OCO لحساب مستخدم"""
+        try:
+            api_key, api_secret = self.user_manager.get_user_api(telegram_id)
+            if not api_key or not api_secret:
+                return {"error": "No API keys"}
+
+            client = MexcClient(api_key, api_secret, is_futures=True)
+            result = client.check_and_cleanup_oco()
+
+            if result.get("position_closed"):
+                exit_price = result.get("exit_price", 0)
+                logger.info(f"🔔 OCO User {telegram_id}: Closed at ${exit_price:.2f}")
+                await self._notify_user(telegram_id, {"type": "oco_close"}, result)
+
+            return result
+        except Exception as e:
+            logger.error(f"OCO user {telegram_id} error: {e}")
+            return {"error": str(e)}
+
+    async def check_oco_all(self) -> Dict:
+        """
+        فحص OCO لكل الحسابات — ينفع يت_called كل دقيقة
+        لو الصفقة اتقفلت على أي حساب، ننضف الأوامر المعاقة
+        """
+        results = {"owner": None, "users": []}
+
+        # المالك
+        try:
+            owner_result = await self.check_oco_for_owner()
+            results["owner"] = owner_result
+        except Exception as e:
+            logger.error(f"OCO owner check error: {e}")
+
+        # المستخدمين النشطين
+        active_users = self.user_manager.get_active_users()
+        for user in active_users:
+            try:
+                user_result = await self.check_oco_for_user(user["telegram_id"])
+                results["users"].append({
+                    "telegram_id": user["telegram_id"],
+                    "result": user_result,
+                })
+            except Exception as e:
+                logger.error(f"OCO user {user['telegram_id']} error: {e}")
+
+        closed_count = sum(1 for r in [results["owner"]] + results["users"] if r and r.get("position_closed"))
+        if closed_count:
+            logger.info(f"🤖 OCO: {closed_count} positions closed and cleaned up")
+
+        return results
+
     def format_execution_report(self, results: Dict) -> str:
         """تقرير التنفيذ التلقائي"""
         msg = "🤖 تقرير التنفيذ التلقائي\n"

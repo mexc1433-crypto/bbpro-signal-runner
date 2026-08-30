@@ -253,6 +253,92 @@ class MexcClient:
             logger.warning(f"Failed to place TP: {e}")
 
     # ═══════════════════════════════════════════
+    # OCO: One-Cancels-Other — إدارة أوامر SL/TP
+    # ═══════════════════════════════════════════
+
+    def get_open_orders(self) -> List[Dict]:
+        """جلب كل الأوامر المعلقة على الذهب"""
+        try:
+            orders = self.exchange.fetch_open_orders(self.GOLD_SYMBOL)
+            return orders
+        except Exception as e:
+            logger.warning(f"Get open orders error: {e}")
+            return []
+
+    def cancel_all_orders(self) -> Dict:
+        """إلغاء كل الأوامر المعلقة على الذهب"""
+        try:
+            self.exchange.cancel_all_orders(self.GOLD_SYMBOL)
+            logger.info("✅ All orders cancelled (OCO cleanup)")
+            return {"success": True}
+        except Exception as e:
+            logger.warning(f"Cancel all orders error: {e}")
+            return {"success": False, "error": str(e)}
+
+    def cancel_order(self, order_id: str) -> bool:
+        """إلغاء أمر محدد"""
+        try:
+            self.exchange.cancel_order(order_id, self.GOLD_SYMBOL)
+            logger.info(f"✅ Order {order_id} cancelled (OCO)")
+            return True
+        except Exception as e:
+            logger.warning(f"Cancel order {order_id} error: {e}")
+            return False
+
+    def check_and_cleanup_oco(self) -> Dict:
+        """
+        OCO Logic: لما TP أو SL يتنفذ، نلغي الآخر
+        1. ن провер إذا فيه صفقة مفتوحة
+        2. لو مفيش صفقة لكن فيه أوامر معلقة → نلغيهم
+        3. نرجع نتيجة: تم تنفيذ TP ولا SL
+        """
+        try:
+            # 1. الصفقات المفتوحة
+            positions = self.get_positions()
+            has_position = any(p.get("contracts", 0) != 0 for p in positions)
+
+            # 2. الأوامر المعلقة
+            open_orders = self.get_open_orders()
+
+            if not has_position and open_orders:
+                # الصفقة اتقفلت (TP أو SL ضرب) لكن فيه أوامر شاغلة
+                # نلغيهم كلهم (OCO cleanup)
+                cancelled = self.cancel_all_orders()
+                
+                # نحدد إيه اللي ضرب: TP ولا SL
+                # عن طريق فحص آخر صفقة مقفولة
+                result = {
+                    "position_closed": True,
+                    "cleanup": cancelled,
+                    "remaining_orders": 0,
+                }
+                
+                # نحاول نعرف إيه اللي ضرب
+                try:
+                    trades = self.exchange.fetch_my_trades(self.GOLD_SYMBOL, limit=3)
+                    if trades:
+                        last_trade = trades[-1]
+                        last_price = last_trade.get("price", 0)
+                        result["exit_price"] = last_price
+                        result["exit_side"] = last_trade.get("side", "")
+                        logger.info(f"🔍 OCO: Position closed at {last_price}")
+                except Exception as e:
+                    logger.warning(f"OCO: Could not fetch trades: {e}")
+                
+                logger.info("🤖 OCO: Position closed, all pending orders cancelled")
+                return result
+
+            return {
+                "position_closed": False,
+                "has_position": has_position,
+                "open_orders": len(open_orders),
+            }
+
+        except Exception as e:
+            logger.error(f"OCO check error: {e}")
+            return {"error": str(e)}
+
+    # ═══════════════════════════════════════════
     # التحقق من الإحالة (Owner only)
     # ═══════════════════════════════════════════
 
