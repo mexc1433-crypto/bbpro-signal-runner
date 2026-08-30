@@ -24,7 +24,7 @@ _ensure_packages()
 
 import asyncio
 import logging
-import schedule
+# schedule replaced by PTB JobQueue
 import time
 import sys
 import os
@@ -1692,6 +1692,30 @@ class CandleHunterSignalBot:
         except Exception as e:
             logger.error(f"Schedule async error: {e}")
 
+    async def _job_scalping(self, context=None):
+        logger.info("⏰ Scalping schedule triggered")
+        await self.run_scalping_scan()
+
+    async def _job_medium(self, context=None):
+        logger.info("⏰ Medium schedule triggered")
+        await self.run_medium_scan()
+
+    async def _job_swing(self, context=None):
+        logger.info("⏰ Swing schedule triggered")
+        await self.run_swing_scan()
+
+    async def _job_analysis(self, context=None):
+        logger.info("⏰ Analysis schedule triggered")
+        await self.send_market_analysis()
+
+    async def _job_summary(self, context=None):
+        logger.info("⏰ Daily summary schedule triggered")
+        await self.send_daily_summary()
+
+    async def _job_news_check(self, context=None):
+        await self.check_news_alerts()
+
+    # Legacy sync wrappers (fallback)
     def scheduled_scalping(self):
         logger.info("⏰ Scalping schedule triggered")
         self._schedule_async(self.run_scalping_scan)
@@ -1713,7 +1737,6 @@ class CandleHunterSignalBot:
         self._schedule_async(self.send_daily_summary)
 
     def scheduled_news_check(self):
-        logger.info("⏰ News check triggered")
         self._schedule_async(self.check_news_alerts)
 
     # ═══════════════════════════════════════════════════════════
@@ -1768,13 +1791,24 @@ class CandleHunterSignalBot:
         logger.info(f"📊 MTF Confluence: ✅ (4h/1h/15m/5m + OBV/Fib/HA)")
         logger.info("=" * 60)
 
-        # Setup schedules
-        schedule.every(15).minutes.do(self.scheduled_scalping)
-        schedule.every(60).minutes.do(self.scheduled_medium)
-        schedule.every(4).hours.do(self.scheduled_swing)
-        schedule.every(10).minutes.do(self.scheduled_news_check)
-        schedule.every(6).hours.do(self.scheduled_analysis)
-        schedule.every().day.at("23:00").do(self.scheduled_summary)
+        # Setup schedules using PTB JobQueue (native async, no GC issues)
+        if app.job_queue:
+            app.job_queue.run_repeating(self._job_scalping, interval=900, first=900)     # 15 min
+            app.job_queue.run_repeating(self._job_medium, interval=3600, first=3600)    # 60 min
+            app.job_queue.run_repeating(self._job_swing, interval=14400, first=14400)  # 4 hours
+            app.job_queue.run_repeating(self._job_news_check, interval=600, first=600) # 10 min
+            app.job_queue.run_repeating(self._job_analysis, interval=21600, first=21600) # 6 hours
+            app.job_queue.run_daily(callback=self._job_summary, time=time(hour=23, minute=0))  # 23:00 daily
+            logger.info("✅ JobQueue scheduled: scalping(15m), medium(60m), swing(4h), news(10m), analysis(6h), summary(23:00)")
+        else:
+            logger.error("❌ JobQueue not available! Fallback to schedule library")
+            import schedule
+            schedule.every(15).minutes.do(self.scheduled_scalping)
+            schedule.every(60).minutes.do(self.scheduled_medium)
+            schedule.every(4).hours.do(self.scheduled_swing)
+            schedule.every(10).minutes.do(self.scheduled_news_check)
+            schedule.every(6).hours.do(self.scheduled_analysis)
+            schedule.every().day.at("23:00").do(self.scheduled_summary)
 
         # Setup Telegram commands
         app = Application.builder().token(BOT_TOKEN).build()
@@ -1809,24 +1843,7 @@ class CandleHunterSignalBot:
             await self.run_scalping_scan()
             logger.info("🔄 Running initial medium scan...")
             await self.run_medium_scan()
-            logger.info("✅ Scheduler loop started — running every 30s")
-
-            heartbeat = 0
-            while True:
-                try:
-                    schedule.run_pending()
-                    heartbeat += 1
-                    # Log heartbeat every 5 min (10 loops × 30s)
-                    if heartbeat % 10 == 0:
-                        next_jobs = []
-                        for job in schedule.jobs:
-                            if job.next_run:
-                                next_jobs.append(f"{job.job_func.__name__}@{job.next_run.strftime('%H:%M')}")
-                        logger.info(f"💓 Scheduler heartbeat #{heartbeat} | Next: {', '.join(next_jobs[:3]) if next_jobs else 'none'}")
-                    await asyncio.sleep(30)
-                except Exception as e:
-                    logger.error(f"Scheduler loop error: {e}")
-                    await asyncio.sleep(10)
+            logger.info("✅ Initial scans complete — JobQueue takes over")
 
         async def post_init(app):
             # لا إرسال رسالة بدء في القناة
