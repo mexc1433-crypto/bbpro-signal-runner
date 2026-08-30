@@ -28,7 +28,7 @@ import logging
 import time
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from typing import Dict, List, Optional
 
 # Telegram
@@ -1823,7 +1823,7 @@ class CandleHunterSignalBot:
             app.job_queue.run_repeating(self._job_swing, interval=14400, first=14400)  # 4 hours
             app.job_queue.run_repeating(self._job_news_check, interval=600, first=600) # 10 min
             app.job_queue.run_repeating(self._job_analysis, interval=21600, first=21600) # 6 hours
-            app.job_queue.run_daily(callback=self._job_summary, time=time(hour=23, minute=0))  # 23:00 daily
+            app.job_queue.run_daily(callback=self._job_summary, time=dt_time(hour=23, minute=0))  # 23:00 daily
             logger.info("✅ JobQueue scheduled: scalping(15m), medium(60m), swing(4h), news(10m), analysis(6h), summary(23:00)")
         else:
             logger.error("❌ JobQueue not available!")
