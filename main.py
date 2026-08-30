@@ -64,6 +64,7 @@ from enhanced_confluence import EnhancedConfluence
 from signal_filters import VolatilityFilter, ActiveHoursFilter, TrendFilter
 from price_alerts import PriceAlertManager
 from smc_analyzer import SMCAnalyzer
+from mtf_confluence import MTFConfluence
 from advanced_features import (
     BalanceChecker, SmartPositionSizer, ConflictResolver,
     FearGreedIndex, DXYFilter, SpreadFilter,
@@ -115,6 +116,7 @@ class CandleHunterSignalBot:
         self.trend_filter = TrendFilter(self.fetcher)
         self.price_alerts = PriceAlertManager()
         self.smc = SMCAnalyzer()
+        self.mtf = MTFConfluence()
         self.broadcast_state = {}  # for broadcast feature
 
         # ===== Advanced Features (non-dependent on auto_trader) =====
@@ -1284,6 +1286,14 @@ class CandleHunterSignalBot:
         elif data == "status":
             await self.cmd_status(update, context)
 
+        elif data == "mtf_analysis":
+            try:
+                mtf_data = self.mtf.analyze_full(self.fetcher)
+                report = self.mtf.format_mtf_report(mtf_data)
+                await query.edit_message_text(report)
+            except Exception as e:
+                await query.edit_message_text(f"⚠️ خطأ: {e}")
+
         elif data == "smc_analysis":
             try:
                 df = await self.fetcher.fetch_ohlcv("1h", limit=200)
@@ -1762,6 +1772,7 @@ class CandleHunterSignalBot:
         logger.info(f"💰 FMP Gold Futures: ✅")
         logger.info(f"🔔 OCO Order Management: ✅")
         logger.info(f"🧠 SMC + Order Flow: ✅ (VWAP/OB/FVG/VP/ADX)")
+        logger.info(f"📊 MTF Confluence: ✅ (4h/1h/15m/5m + OBV/Fib/HA)")
         logger.info("=" * 60)
 
         # Setup schedules
