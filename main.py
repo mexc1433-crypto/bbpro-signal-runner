@@ -1725,6 +1725,22 @@ class CandleHunterSignalBot:
 
         app.post_init = post_init
 
+        # Error handler — تجاهل Conflict (multiple instances مؤقت)
+        async def error_handler(update, context):
+            error = context.error
+            from telegram.error import Conflict, NetworkError, TimedOut
+            if isinstance(error, Conflict):
+                logger.warning("⚠️ Telegram Conflict — another instance running. Waiting 10s...")
+                await asyncio.sleep(10)
+                return
+            elif isinstance(error, (NetworkError, TimedOut)):
+                logger.warning(f"⚠️ Network error: {error}")
+                return
+            else:
+                logger.error(f"Unhandled error: {error}")
+
+        app.add_error_handler(error_handler)
+
         logger.info("Bot is running! Press Ctrl+C to stop.")
         app.run_polling(stop_signals=None)
 
