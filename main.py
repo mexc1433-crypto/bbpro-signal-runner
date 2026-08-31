@@ -373,7 +373,7 @@ class CandleHunterSignalBot:
 
         if trade_type == "SCALPING":
             timeframes = TIMEFRAMES["SCALPING"]
-            strategy_names = ["scalping"]
+            strategy_names = ["scalping", "momentum", "mean_reversion"]
         elif trade_type == "MEDIUM":
             timeframes = TIMEFRAMES["MEDIUM"]
             strategy_names = ["trend_following", "mean_reversion", "momentum", "supertrend", "multi_confluence"]

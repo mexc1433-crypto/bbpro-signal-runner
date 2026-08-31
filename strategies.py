@@ -455,7 +455,7 @@ def scalping_strategy(df: pd.DataFrame, symbol: str, trade_type: str = "SCALPING
     reasoning_parts = []
 
     # Quick BUY
-    if rsi7 < 30 and price > ema9 and stoch_k < 20 and stoch_k > stoch_d and wr < -80:
+    if rsi7 < 35 and price > ema9 and stoch_k < 25 and stoch_k > stoch_d and wr < -75:
         confidence = 55
         reasoning_parts.append(f"RSI(7) {rsi7:.0f} - تشبع بيعي سريع")
         reasoning_parts.append("السعر فوق EMA 9 (دعم قريب)")
@@ -483,7 +483,7 @@ def scalping_strategy(df: pd.DataFrame, symbol: str, trade_type: str = "SCALPING
         )
 
     # Quick SELL
-    elif rsi7 > 70 and price < ema9 and stoch_k > 80 and stoch_k < stoch_d and wr > -20:
+    elif rsi7 > 65 and price < ema9 and stoch_k > 75 and stoch_k < stoch_d and wr > -25:
         confidence = 55
         reasoning_parts.append(f"RSI(7) {rsi7:.0f} - تشبع شرائي سريع")
         reasoning_parts.append("السعر تحت EMA 9 (مقاومة قريبة)")
