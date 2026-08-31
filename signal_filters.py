@@ -16,7 +16,7 @@ class VolatilityFilter:
 
     def __init__(self):
         # ATR كنسبة من السعر — النطاق المثالي
-        self.atr_min_pct = 0.15   # أقل من كده = لا حركة =skip
+        self.atr_min_pct = 0.06   # أقل من كده = لا حركة =skip (lowered for low-vol sessions)
         self.atr_max_pct = 1.5    # أعلى من كده = تذبذب خطير =skip
 
     def check(self, df: pd.DataFrame, price: float) -> Dict:

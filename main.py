@@ -61,7 +61,7 @@ from chart_generator import generate_signal_chart
 from economic_calendar import EconomicCalendar
 from confluence import ConfluenceAnalyzer
 from enhanced_confluence import EnhancedConfluence
-from enhanced_apis import finnhub_news, groq_analyze_news
+from enhanced_apis import finnhub_news, groq_analyze_news, get_confidence_adjustment
 from signal_filters import VolatilityFilter, ActiveHoursFilter, TrendFilter
 from price_alerts import PriceAlertManager
 from smc_analyzer import SMCAnalyzer
