@@ -662,24 +662,13 @@ class CandleHunterSignalBot:
                 except Exception as e:
                     logger.error(f"Error sending to {channel}: {e}")
 
-        # 💰 FEATURE 3: Balance Check قبل تنفيذ الصفقة
+        # 💰 FEATURE 3: Balance Check — owner فقط، لا يحجب التنفيذ عن المستخدمين
         if filtered_signals:
             bal = self.balance_checker.check_owner_balance()
             if not bal.get("ok"):
-                logger.warning(f"💰 Skipping auto-trade: {bal['reason']}")
-                # إرسال تنبيه للأدمن
-                try:
-                    await self.bot.send_message(
-                        chat_id=self.admin_id,
-                        text=f"⚠️ رصيد MEXC غير كافي\n\n"
-                             f"الرصيد: ${bal.get('balance', 0):.2f}\n"
-                             f"الحد الأدنى: ${self.balance_checker.min_balance:.2f}\n"
-                             f"الإشارة لم تُنفذ تلقائياً"
-                    )
-                except Exception:
-                    pass
+                logger.warning(f"💰 Owner balance low: {bal['reason']} — signal still forwarded for users")
             else:
-                # 📐 FEATURE 6: Smart Position Sizing — تعديل حجم الصفقة
+                # 📐 FEATURE 6: Smart Position Sizing — تعديل حجم الصفقة (owner only)
                 for sig in filtered_signals:
                     sizing = self.position_sizer.calculate_size(
                         bal["balance"],
@@ -692,15 +681,15 @@ class CandleHunterSignalBot:
                         sig["smart_risk_pct"] = sizing["risk_pct"]
                         logger.info(f"📐 Smart sizing: {sizing['amount']} (risk={sizing['risk_pct']}%)")
 
-                # 📡 إرسال الإشارة لبوت التداول التلقائي (عبر HTTP API)
-                try:
-                    forward_result = await self.forwarder.forward_signal(filtered_signals[0])
-                    if forward_result.get("success"):
-                        logger.info(f"📡 Signal forwarded to trade bot successfully")
-                    else:
-                        logger.warning(f"⚠️ Forward failed: {forward_result.get('error', 'unknown')}")
-                except Exception as e:
-                    logger.error(f"Signal forward error: {e}")
+            # 📡 إرسال الإشارة لبوت التداول التلقائي (دائماً — trade bot يفحص رصيد كل مستخدم لوحده)
+            try:
+                forward_result = await self.forwarder.forward_signal(filtered_signals[0])
+                if forward_result.get("success"):
+                    logger.info(f"📡 Signal forwarded to trade bot: {filtered_signals[0].get('signal_type', '')}")
+                else:
+                    logger.warning(f"⚠️ Forward failed: {forward_result.get('error', 'unknown')}")
+            except Exception as e:
+                logger.error(f"Signal forward error: {e}")
 
     def _format_user_notification(self, signal: Dict, result: Dict) -> str:
         """إشعار المستخدم بتنفيذ صفقة على حسابه"""
