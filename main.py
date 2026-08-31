@@ -584,7 +584,10 @@ class CandleHunterSignalBot:
                     signal["confidence"] = max(0, min(100, old_conf + ai_adj))
                     logger.info(f"🤖 AI adjusted signal {sig_dir}: {old_conf:.0f} → {signal['confidence']:.0f} ({ai_adj:+.1f})")
 
-        # 🎯 FEATURE 2: Multi-Signal Confirmation — لازم استراتيجيتين توافقوا على نفس الاتجاه
+        # 🎯 FEATURE 2: Multi-Signal Confirmation (Soft Filter)
+        # لو استراتيجيتين+ توافقوا → multi_confirmed = True (boost)
+        # لو استراتيجية واحدة بس بس confidence >= 70% → نمررها مع علامة single
+        # لو استراتيجية واحدة و confidence < 70% → نحجبها
         direction_counts = {}
         for s in signals:
             d = s.get("signal_type", "")
@@ -593,18 +596,27 @@ class CandleHunterSignalBot:
         confirmed_signals = []
         for s in signals:
             d = s.get("signal_type", "")
-            if direction_counts.get(d, 0) >= 2:
+            count = direction_counts.get(d, 0)
+            if count >= 2:
                 s["multi_confirmed"] = True
-                s["confirming_strategies"] = direction_counts[d]
+                s["confirming_strategies"] = count
                 confirmed_signals.append(s)
+            elif s.get("confidence", 0) >= 70:
+                s["multi_confirmed"] = False
+                s["confirming_strategies"] = count
+                s["single_strategy"] = True
+                confirmed_signals.append(s)
+                logger.info(f"⚡ Single-strategy pass: {s.get('strategy_name')} {d} (conf={s.get('confidence', 0):.0f}%)")
             else:
-                logger.info(f"🚫 Not multi-confirmed: {s.get('strategy_name')} {d} (only 1 strategy)")
+                logger.info(f"🚫 Filtered: {s.get('strategy_name')} {d} (only 1 strategy, conf={s.get('confidence', 0):.0f}% < 70%)")
 
         if not confirmed_signals:
-            logger.info(f"📊 No multi-confirmed signals (need 2+ strategies agreeing)")
+            logger.info(f"📊 No signals passed multi-confirmation filter")
             return
 
-        logger.info(f"📊 {len(signals)} signals → {len(confirmed_signals)} multi-confirmed")
+        multi_count = sum(1 for s in confirmed_signals if s.get("multi_confirmed"))
+        single_count = sum(1 for s in confirmed_signals if s.get("single_strategy"))
+        logger.info(f"📊 {len(signals)} signals → {len(confirmed_signals)} passed ({multi_count} multi + {single_count} single)")
 
         # فلترة الإشارات: مسافة + تكرار + تأكيد
         filtered_signals = []
