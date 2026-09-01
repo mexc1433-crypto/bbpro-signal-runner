@@ -819,7 +819,16 @@ class CandleHunterSignalBot:
     # Telegram Commands
     # ═══════════════════════════════════════════════════════════
 
+
+    def _ensure_message(self, update):
+        """فحص أن update.message ليس None"""
+        if update.message is None and update.effective_message is None:
+            return None
+        return update.message or update.effective_message
+
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """أمر /start — يرحب بالمستخدم ويظهر القائمة"""
         user = update.effective_user
         user_id = user.id
@@ -882,6 +891,8 @@ class CandleHunterSignalBot:
         )
 
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """أمر /help"""
         user_id = update.effective_user.id
         is_admin = self._is_admin(user_id)
@@ -922,6 +933,8 @@ class CandleHunterSignalBot:
         )
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """أمر /status"""
         user_id = update.effective_user.id
         is_admin = self._is_admin(user_id)
@@ -953,6 +966,8 @@ class CandleHunterSignalBot:
         await update.message.reply_text(status)
 
     async def cmd_scan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """أمر /scan — مسح فوري"""
         user_id = update.effective_user.id
         is_admin = self._is_admin(user_id)
@@ -971,6 +986,8 @@ class CandleHunterSignalBot:
             await update.message.reply_text("⚠️ لا توجد إشارات في الوقت الحالي")
 
     async def cmd_analysis(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """📊 تقرير شامل للذهب من كل الـ APIs"""
         user_id = update.effective_user.id
         if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
@@ -990,6 +1007,8 @@ class CandleHunterSignalBot:
             await msg.edit_text(f"❌ خطأ: {e}")
 
     async def cmd_daily_brief(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """🤖 ملخص يومي ذكي بالعربي"""
         user_id = update.effective_user.id
         if not self._is_admin(user_id):
@@ -1006,6 +1025,8 @@ class CandleHunterSignalBot:
             await msg.edit_text(f"❌ خطأ: {e}")
 
     async def cmd_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """أمر /summary"""
         user_id = update.effective_user.id
         if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
@@ -1018,6 +1039,8 @@ class CandleHunterSignalBot:
         await update.message.reply_text(message, parse_mode='HTML')
 
     async def cmd_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """أمر /performance — تقرير 7 أيام"""
         user_id = update.effective_user.id
         if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
@@ -1027,6 +1050,8 @@ class CandleHunterSignalBot:
         await update.message.reply_text(report)
 
     async def cmd_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """أمر /stats — لوحة إحصائيات شاملة (30 يوم)"""
         user_id = update.effective_user.id
         if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
@@ -1043,6 +1068,8 @@ class CandleHunterSignalBot:
         await update.message.reply_text(report)
 
     async def cmd_confluence_enhanced(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """أمر /scan_pro — تحليل تطابق محسّن (20 مؤشر)"""
         user_id = update.effective_user.id
         if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
@@ -1058,6 +1085,8 @@ class CandleHunterSignalBot:
             await update.message.reply_text("❌ حدث خطأ في التحليل")
 
     async def cmd_calendar(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """أمر /calendar"""
         user_id = update.effective_user.id
         if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
@@ -1068,6 +1097,8 @@ class CandleHunterSignalBot:
         await update.message.reply_text(msg)
 
     async def cmd_confluence(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.message is None:
+            return
         """أمر /confluence"""
         user_id = update.effective_user.id
         if not self._is_admin(user_id) and not self.user_manager.is_registered(user_id):
@@ -1084,6 +1115,8 @@ class CandleHunterSignalBot:
 
     async def handle_registration(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """معالجة رسائل التسجيل (MEXC UID, API Key, API Secret)"""
+        if update.message is None:
+            return
         user_id = update.effective_user.id
         text = update.message.text.strip()
 
@@ -1605,6 +1638,8 @@ class CandleHunterSignalBot:
 
     async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """معالجة الرسائل النصية العادية (خلال التسجيل)"""
+        if update.message is None:
+            return
         user_id = update.effective_user.id
         if user_id in self._registration_state:
             await self.handle_registration(update, context)
