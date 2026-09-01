@@ -34,7 +34,7 @@ class EconomicCalendar:
         """يجلب أحداث الأسبوع من ForexFactory"""
         # Cache لمدة ساعة
         if self.cached_events and self.last_fetch:
-            if (datetime.now() - self.last_fetch).total_seconds() < 3600:
+            if (datetime.now() - self.last_fetch).total_seconds() < 10800:  # 3 hour cache
                 return self.cached_events
 
         try:
