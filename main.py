@@ -459,10 +459,22 @@ class CandleHunterSignalBot:
         now = datetime.now()
 
         # 1. تحقق من الإشارات المعلقة (PENDING) في tracker — لو في صفقة لسه مفتوحة نفس الاتجاه
+        #    لكن تجاهل الإشارات اللي تعدّت TTL (هتتقفل في الـ scan الجاية)
         for sig in self.tracker.signals:
             if sig.get("status") != "PENDING":
                 continue
             if sig.get("signal_type") == signal_type:
+                # فحص عمر الإشارة — لو قديمة، مش duplicate
+                try:
+                    created = datetime.fromisoformat(sig.get("created_at", ""))
+                    age_hours = (now - created).total_seconds() / 3600
+                    trade_type = sig.get("trade_type", "MEDIUM")
+                    ttl = self.tracker.PENDING_TTL_HOURS.get(trade_type, self.tracker.DEFAULT_TTL_HOURS)
+                    if age_hours >= ttl:
+                        logger.info(f"⏰ Stale PENDING signal ({age_hours:.1f}h > TTL {ttl}h) — not blocking")
+                        continue
+                except:
+                    pass
                 logger.info(f"🚫 Duplicate: PENDING {signal_type} signal still open (id={sig['id']})")
                 return True
 

@@ -121,11 +121,30 @@ class SignalTracker:
         logger.info(f"Tracking signal: {entry['id']} {entry['signal_type']} {entry['symbol']}")
 
     def check_pending_signals(self, current_price: float) -> List[Dict]:
-        """فحص الإشارات المعلقة — مع Partial TP و Trailing Stop"""
+        """فحص الإشارات المعلقة — مع Partial TP و Trailing Stop + TTL expiry"""
         updated = []
+        now = datetime.now()
         for sig in self.signals:
             if sig["status"] != "PENDING":
                 continue
+
+            # فحص TTL — لو الإشارة قديمة، اقفلها كـ EXPIRED
+            try:
+                created = datetime.fromisoformat(sig.get("created_at", now.isoformat()))
+                age_hours = (now - created).total_seconds() / 3600
+                trade_type = sig.get("trade_type", "MEDIUM")
+                ttl = self.PENDING_TTL_HOURS.get(trade_type, self.DEFAULT_TTL_HOURS)
+                if age_hours >= ttl:
+                    sig["status"] = "CLOSED"
+                    sig["result"] = "EXPIRED"
+                    sig["exit_price"] = current_price
+                    sig["exit_time"] = now.strftime('%Y-%m-%d %H:%M')
+                    sig["close_type"] = "TTL_EXPIRED"
+                    updated.append(sig)
+                    logger.info(f"⏰ EXPIRED (TTL {ttl}h): {sig['id']} {sig['signal_type']} — age {age_hours:.1f}h")
+                    continue
+            except Exception as e:
+                logger.warning(f"TTL check failed for {sig.get('id')}: {e}")
 
             entry = sig["entry_price"]
             tp1 = sig.get("take_profit_1", 0)
