@@ -24,6 +24,14 @@ class SignalTracker:
     MAX_DAILY_LOSSES = 3         # إيقاف بعد 3 خسائر في يوم واحد
     MAX_DAILY_DRAWDOWN_PCT = 5.0  # إيقاف بعد خسارة 5% من رأس المال
 
+    # ===== TTL for PENDING signals =====
+    PENDING_TTL_HOURS = {
+        "SCALPING": 2,    # ساعتين للـ scalping
+        "MEDIUM": 6,      # 6 ساعات للـ medium
+        "SWING": 24,      # 24 ساعة للـ swing
+    }
+    DEFAULT_TTL_HOURS = 4  # افتراضي
+
     def get_daily_stats(self, date_str: str = None) -> Dict:
         """إحصائيات يوم واحد — للـ drawdown limit"""
         if date_str is None:
