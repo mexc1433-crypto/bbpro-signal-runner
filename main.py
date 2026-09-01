@@ -77,7 +77,11 @@ from pre_close_alert import PreCloseAlert
 from user_manager import UserManager, Encryption
 from auto_trader import AutoTrader
 from signal_forwarder import SignalForwarder
+import pandas as pd
 from mexc_client import MexcClient
+from circuit_breaker import CircuitBreaker
+from subscription_manager import SubscriptionManager
+from adaptive_learning import AdaptiveLearning
 
 # ═══════════════════════════════════════════════════════════════
 # Logging
@@ -129,6 +133,10 @@ class CandleHunterSignalBot:
         self.cooldown = SignalCooldown()
         self.market_hours = MarketHoursManager()
         self.auto_restart = AutoRestartManager()
+        self.circuit_breaker = CircuitBreaker()
+        self.subscription_manager = SubscriptionManager()
+        self.adaptive_learning = AdaptiveLearning()
+        self._max_concurrent_positions = 1
         self._scheduler_task = None
         self.pre_close = PreCloseAlert()
         self.referral_system = ReferralSystem()
@@ -246,6 +254,8 @@ class CandleHunterSignalBot:
              InlineKeyboardButton("📊 حالتي", callback_data="myaccount")],
             [InlineKeyboardButton("👥 الإحالة", callback_data="referral"),
              InlineKeyboardButton("🔔 تنبيه سعر", callback_data="price_alerts")],
+            [InlineKeyboardButton("💎 اشتراكي", callback_data="subscription"),
+             InlineKeyboardButton("🧠 أداء الاستراتيجيات", callback_data="adaptive_stats")],
             [InlineKeyboardButton("⚙️ الإعدادات", callback_data="settings"),
              InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data="main_menu")],
         ]
@@ -293,6 +303,29 @@ class CandleHunterSignalBot:
                 try:
                     pending = self.tracker.get_pending_signals()
                     self.pre_close.check_signals(pending, ticker["last"], self.bot)
+                    # 🛑 CIRCUIT BREAKER: سجل نتائج الإشارات المغلقة
+                    for sig in updated:
+                        if sig.get("result") == "WIN":
+                            self.circuit_breaker.record_win()
+                        elif sig.get("result") == "LOSS":
+                            should_pause, reason = self.circuit_breaker.record_loss(sig.get("strategy_name", ""))
+                            if should_pause:
+                                logger.warning(f"🛑 Circuit Breaker triggered: {reason}")
+                                # إرسال تنبيه للقناة الخاصة
+                                if self.private_channel:
+                                    try:
+                                        await self.bot.send_message(
+                                            chat_id=self.private_channel,
+                                            text="🛑 **Circuit Breaker مفعّل**\n" + str(reason) + "\nالتداول متوقف مؤقتاً"
+                                        )
+                                    except:
+                                        pass
+                        # 🧠 ADAPTIVE LEARNING: سجل النتيجة
+                        if sig.get("result") in ("WIN", "LOSS"):
+                            session_name = getattr(self.market_hours, 'get_current_session_name', lambda: "unknown")()
+                            self.adaptive_learning.record_result(
+                                sig.get("strategy_name", ""), session_name, sig.get("result", "")
+                            )
                 except Exception as e:
                     logger.warning(f"Pre-close check failed: {e}")
 
@@ -522,6 +555,23 @@ class CandleHunterSignalBot:
             logger.info(f"🌙 Market closed: {mkt['status']} — no signals sent")
             return
 
+        # 🛑 CIRCUIT BREAKER: لو في إيقاف نشط، ما تبعتش إشارات
+        cb_paused, cb_reason = self.circuit_breaker.is_paused()
+        if cb_paused:
+            logger.warning(f"🛑 Circuit Breaker active: {cb_reason} — skipping signals")
+            return
+
+        # 📦 MAX CONCURRENT POSITIONS: لو في صفقة مفتوحة على حساب المالك، ما تفتحش جديد
+        if self.auto_trader and self.auto_trader.owner_client:
+            try:
+                positions = self.auto_trader.owner_client.get_positions()
+                active_positions = [p for p in positions if p.get("size", 0) and float(p.get("size", 0)) > 0]
+                if len(active_positions) >= self._max_concurrent_positions:
+                    logger.info(f"📦 Max positions reached ({len(active_positions)}/{self._max_concurrent_positions}) — skipping")
+                    return
+            except Exception as e:
+                logger.warning(f"Position check failed: {e}")
+
         # ⏱️ SIGNAL COOLDOWN: لو في كولداون ما تبعتش
         if not self.cooldown.can_send():
             remaining = self.cooldown.get_remaining()
@@ -596,6 +646,16 @@ class CandleHunterSignalBot:
                     signal["confidence"] = max(0, min(100, old_conf + ai_adj))
                     logger.info(f"🤖 AI adjusted signal {sig_dir}: {old_conf:.0f} → {signal['confidence']:.0f} ({ai_adj:+.1f})")
 
+        # 🧠 ADAPTIVE LEARNING: تعديل ثقة الإشارات حسب أداء الاستراتيجية التاريخي
+        for signal in signals:
+            strategy = signal.get("strategy_name", "")
+            session = self.market_hours.get_current_session_name() if hasattr(self.market_hours, 'get_current_session_name') else "unknown"
+            adjustment = self.adaptive_learning.get_adjustment(strategy, session)
+            if adjustment != 0:
+                old_conf = signal.get("confidence", 50)
+                signal["confidence"] = max(0, min(100, old_conf + adjustment))
+                logger.info(f"🧠 Adaptive: {strategy} [{session}] {old_conf:.0f} → {signal['confidence']:.0f} ({adjustment:+.1f}%)")
+
         # 🎯 FEATURE 2: Multi-Signal Confirmation (Soft Filter)
         # لو استراتيجيتين+ توافقوا → multi_confirmed = True (boost)
         # لو استراتيجية واحدة بس بس confidence >= 70% → نمررها مع علامة single
@@ -655,6 +715,36 @@ class CandleHunterSignalBot:
                 logger.info(f"🚫 Skip duplicate direction in same scan: {sig_dir}")
                 continue
 
+            # 📐 DYNAMIC SL/TP (ATR-based): تعديل SL/TP حسب التقلب الحالي
+            try:
+                df_15m = self.fetcher.fetch_ohlcv("15m", limit=20)
+                if df_15m is not None and len(df_15m) >= 14:
+                    high_low = df_15m["high"] - df_15m["low"]
+                    high_close = (df_15m["high"] - df_15m["close"].shift()).abs()
+                    low_close = (df_15m["low"] - df_15m["close"].shift()).abs()
+                    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+                    atr = float(tr.iloc[-14:].mean())
+                    atr_pct = (atr / signal["entry_price"]) * 100
+
+                    entry = signal["entry_price"]
+                    is_buy = signal["signal_type"] == "BUY"
+                    # SL = 1.5x ATR, TP1 = 1x ATR, TP2 = 2x ATR
+                    if atr_pct > 0.1:
+                        sl_mult = 1.5
+                        tp1_mult = 1.0
+                        tp2_mult = 2.0
+                        if is_buy:
+                            signal["stop_loss"] = round(entry - (atr * sl_mult), 2)
+                            signal["take_profit_1"] = round(entry + (atr * tp1_mult), 2)
+                            signal["take_profit_2"] = round(entry + (atr * tp2_mult), 2)
+                        else:
+                            signal["stop_loss"] = round(entry + (atr * sl_mult), 2)
+                            signal["take_profit_1"] = round(entry - (atr * tp1_mult), 2)
+                            signal["take_profit_2"] = round(entry - (atr * tp2_mult), 2)
+                        logger.info(f"📐 ATR SL/TP: atr={atr:.2f} ({atr_pct:.2f}%) SL={signal['stop_loss']} TP1={signal['take_profit_1']} TP2={signal['take_profit_2']}")
+            except Exception as e:
+                logger.warning(f"ATR adjustment failed: {e}")
+
             capital_plans = self.risk_manager.get_all_capital_plans(signal)
             channels = self.channel_manager.get_channel_for_signal(signal)
 
@@ -670,6 +760,12 @@ class CandleHunterSignalBot:
                     sent_directions.add(sig_dir)
                     # ⏱️ Record cooldown
                     self.cooldown.record_signal()
+                    # 🧠 Record to adaptive learning
+                    session_name = self.market_hours.get_current_session_name() if hasattr(self.market_hours, 'get_current_session_name') else "unknown"
+                    self.adaptive_learning.record_signal(
+                        signal.get("strategy_name", ""), session_name,
+                        signal.get("signal_type", ""), signal.get("confidence", 50)
+                    )
                     await asyncio.sleep(2)
                 except Exception as e:
                     logger.error(f"Error sending to {channel}: {e}")
@@ -1794,6 +1890,106 @@ class CandleHunterSignalBot:
     def scheduled_news_check(self):
         self._schedule_async(self.check_news_alerts)
 
+    async def _job_health_monitor(self, context=None):
+        """Health monitor: check all systems every 30 min"""
+        try:
+            # Check Trade Bot
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(
+                        os.getenv("TRADE_BOT_URL", "https://bbpro-trade-bot-production.up.railway.app") + "/stats",
+                        timeout=10
+                    )
+                    trade_bot_ok = resp.status_code == 200
+            except:
+                trade_bot_ok = False
+
+            # Check MEXC API (owner)
+            mexc_ok = True
+            if self.auto_trader and self.auto_trader.owner_client:
+                try:
+                    bal = self.auto_trader.owner_client.get_balance()
+                    mexc_ok = bal.get("success", False)
+                    if mexc_ok:
+                        self.circuit_breaker.record_api_success()
+                    else:
+                        should_pause, reason = self.circuit_breaker.record_api_failure()
+                        if should_pause and self.private_channel:
+                            await self.bot.send_message(
+                                chat_id=self.private_channel,
+                                text="⚠️ **MEXC API not responding**\n" + str(reason)
+                            )
+                except:
+                    mexc_ok = False
+                    should_pause, reason = self.circuit_breaker.record_api_failure()
+                    if should_pause and self.private_channel:
+                        await self.bot.send_message(
+                            chat_id=self.private_channel,
+                            text="⚠️ **MEXC API failed**\n" + str(reason)
+                        )
+
+            # Failsafe: Check user API keys
+            active_users = self.user_manager.get_active_users()
+            for user in active_users:
+                try:
+                    api_key, api_secret = self.user_manager.get_user_api(user["telegram_id"])
+                    if not api_key or not api_secret:
+                        continue
+                    client = MexcClient(api_key, api_secret, is_futures=True)
+                    bal = client.get_balance()
+                    if not bal.get("success"):
+                        self.user_manager.pause_user(user["telegram_id"])
+                        try:
+                            await self.bot.send_message(
+                                chat_id=user["telegram_id"],
+                                text="⚠️ **مفتاح MEXC API مش شغال**\n"
+                                     "تم إيقاف التداول التلقائي على حسابك.\n"
+                                     "حدث مفتاحك من: MEXC → Profile → API Management\n"
+                                     "ثم استخدم /start لإعادة التسجيل"
+                            )
+                        except:
+                            pass
+                        logger.warning(f"Dead API key for user {user.get('telegram_id')} — paused & notified")
+                except:
+                    pass
+
+            if not trade_bot_ok or not mexc_ok:
+                logger.warning(f"🏥 Health: TradeBot={'OK' if trade_bot_ok else 'DOWN'} MEXC={'OK' if mexc_ok else 'DOWN'}")
+                if not trade_bot_ok and self.private_channel:
+                    await self.bot.send_message(
+                        chat_id=self.private_channel,
+                        text="⚠️ **Trade Bot مش مستجيب** — جاري المراقبة"
+                    )
+            else:
+                logger.info("🏥 Health: All systems OK")
+
+        except Exception as e:
+            logger.error(f"Health monitor error: {e}")
+
+    async def _job_subscription_check(self, context=None):
+        """Check expired subscriptions every hour"""
+        try:
+            expired = self.subscription_manager.expire_check_all()
+            for sub in expired:
+                tid = sub.get("telegram_id")
+                if tid:
+                    try:
+                        price = self.subscription_manager.get_price_for_user(tid)
+                        await self.bot.send_message(
+                            chat_id=tid,
+                            text=(
+                                "💎 اشتراكك انتهى\n"
+                                "━━━━━━━━━━━━━━━━━━━━\n"
+                                f"تجدد بـ ${price}/أسبوع\n"
+                                "تواصل مع الإدارة للتجديد"
+                            )
+                        )
+                    except:
+                        pass
+        except Exception as e:
+            logger.error(f"Subscription check error: {e}")
+
     # ═══════════════════════════════════════════════════════════
     # Main Run
     # ═══════════════════════════════════════════════════════════
@@ -1877,6 +2073,8 @@ class CandleHunterSignalBot:
             app.job_queue.run_repeating(self._job_medium, interval=3600, first=3600)    # 60 min
             app.job_queue.run_repeating(self._job_swing, interval=14400, first=14400)  # 4 hours
             app.job_queue.run_repeating(self._job_news_check, interval=600, first=600) # 10 min
+            app.job_queue.run_repeating(self._job_health_monitor, interval=1800, first=300) # 30 min health
+            app.job_queue.run_repeating(self._job_subscription_check, interval=3600, first=600) # 1 hour sub check
             app.job_queue.run_repeating(self._job_analysis, interval=21600, first=21600) # 6 hours
             app.job_queue.run_daily(callback=self._job_summary, time=dt_time(hour=23, minute=0))  # 23:00 daily
             logger.info("✅ JobQueue scheduled: scalping(15m), medium(60m), swing(4h), news(10m), analysis(6h), summary(23:00)")

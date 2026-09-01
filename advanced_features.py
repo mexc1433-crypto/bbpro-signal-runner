@@ -484,6 +484,24 @@ class MarketHoursManager:
             else:
                 return {"open": False, "status": "🟡 استراحة ساعية", "next_open": "23:00 UTC"}
 
+    @staticmethod
+    def get_current_session_name() -> str:
+        """اسم الجلسة الحالية (آسيا/لندن/نيويورك)"""
+        now = datetime.utcnow()
+        hour = now.hour
+
+        # London: 07:00-16:00 UTC
+        if 7 <= hour < 16:
+            return "london"
+        # New York: 13:00-22:00 UTC
+        elif 13 <= hour < 22:
+            return "newyork"
+        # Asia: 23:00-08:00 UTC
+        elif hour >= 23 or hour < 8:
+            return "asia"
+        else:
+            return "off" 
+
 
 # ═══════════════════════════════════════════════════
 # FEATURE 13: Auto-Restart Manager
