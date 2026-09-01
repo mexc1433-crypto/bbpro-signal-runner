@@ -1875,7 +1875,9 @@ class CandleHunterSignalBot:
                 logger.warning(f"⚠️ Network error: {error}")
                 return
             else:
+                import traceback
                 logger.error(f"Unhandled error: {error}")
+                logger.error(traceback.format_exc())
 
         app.add_error_handler(error_handler)
 
