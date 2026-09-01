@@ -1208,6 +1208,8 @@ class CandleHunterSignalBot:
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """معالجة أزرار Inline Keyboard"""
         query = update.callback_query
+        if query is None:
+            return
         await query.answer()
         user_id = query.from_user.id
         data = query.data
