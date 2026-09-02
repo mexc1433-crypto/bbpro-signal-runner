@@ -25,8 +25,35 @@ class BalanceChecker:
         self.last_balance = 0.0
 
     def check_owner_balance(self) -> Dict:
-        """يفحص رصيد المالك — يرجع هل فيه رصيد كافي ولا لا"""
+        """يفحص رصيد المالك — من trade bot API (الحساب الفعلي للتداول)"""
         try:
+            import requests as req
+            trade_bot_url = os.getenv("TRADE_BOT_URL", "")
+            if not trade_bot_url:
+                trade_bot_url = "https://bbpro-trade-bot-production.up.railway.app"
+            # الأول: نجيب الرصيد الحقيقي من الـ trade bot
+            try:
+                resp = req.get(f"{trade_bot_url}/positions", timeout=15)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for u in data.get("users", []):
+                        if u.get("user") in ("", None) or u.get("telegram_id") == 8533137153:
+                            free = float(u.get("balance", 0))
+                            self.last_balance = free
+                            self.last_check = datetime.now()
+                            if free < self.min_balance:
+                                logger.warning(f"💰 Low MEXC balance: ${free:.2f} (min=${self.min_balance})")
+                                return {
+                                    "ok": False,
+                                    "reason": f"Insufficient balance: ${free:.2f} (min ${self.min_balance})",
+                                    "balance": free,
+                                }
+                            logger.info(f"✅ MEXC balance OK (trade bot): ${free:.2f}")
+                            return {"ok": True, "balance": free}
+            except Exception as e:
+                logger.warning(f"Trade bot balance check failed: {e} — falling back to local keys")
+
+            # Fallback: المفاتيح المحلية
             if not self.auto_trader or not self.auto_trader.owner_client:
                 return {"ok": False, "reason": "No MEXC client configured"}
 

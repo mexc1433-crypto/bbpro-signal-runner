@@ -27,8 +27,8 @@ class SignalTracker:
     # ===== TTL for PENDING signals =====
     PENDING_TTL_HOURS = {
         "SCALPING": 2,    # ساعتين للـ scalping
-        "MEDIUM": 6,      # 6 ساعات للـ medium
-        "SWING": 24,      # 24 ساعة للـ swing
+        "MEDIUM": 24,     # 24 ساعة للـ medium (الأهداف بتاخد وقت أطول من 6 ساعات)
+        "SWING": 72,      # 72 ساعة للـ swing
     }
     DEFAULT_TTL_HOURS = 4  # افتراضي
 
