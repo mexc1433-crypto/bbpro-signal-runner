@@ -561,16 +561,20 @@ class CandleHunterSignalBot:
             logger.warning(f"🛑 Circuit Breaker active: {cb_reason} — skipping signals")
             return
 
-        # 📦 MAX CONCURRENT POSITIONS: لو في صفقة مفتوحة على حساب المالك، ما تفتحش جديد
-        if self.auto_trader and self.auto_trader.owner_client:
-            try:
-                positions = self.auto_trader.owner_client.get_positions()
-                active_positions = [p for p in positions if p.get("size", 0) and float(p.get("size", 0)) > 0]
-                if len(active_positions) >= self._max_concurrent_positions:
-                    logger.info(f"📦 Max positions reached ({len(active_positions)}/{self._max_concurrent_positions}) — skipping")
-                    return
-            except Exception as e:
-                logger.warning(f"Position check failed: {e}")
+        # 📦 MAX CONCURRENT POSITIONS: الحماية الفعلية في الـ trade bot (بيتخطى التنفيذ لو في صفقة)
+        # هنا warning فقط — الإشارات مستمرة للقنوات للمتداولين اليدويين
+        try:
+            import requests as _req
+            _tb_url = os.getenv("TRADE_BOT_URL", "https://bbpro-trade-bot-production.up.railway.app")
+            _resp = _req.get(f"{_tb_url}/positions", timeout=10)
+            if _resp.status_code == 200:
+                for _u in _resp.json().get("users", []):
+                    if _u.get("user") in ("", None) or _u.get("telegram_id") == 8533137153:
+                        _n = len(_u.get("positions", []))
+                        if _n >= self._max_concurrent_positions:
+                            logger.info(f"📦 Owner has {_n} open position(s) — trade bot will skip auto-execution; channel signals continue")
+        except Exception as e:
+            logger.warning(f"Position visibility check failed: {e}")
 
         # ⏱️ SIGNAL COOLDOWN: لو في كولداون ما تبعتش
         if not self.cooldown.can_send():
@@ -2077,7 +2081,7 @@ class CandleHunterSignalBot:
             app.job_queue.run_repeating(self._job_subscription_check, interval=3600, first=600) # 1 hour sub check
             app.job_queue.run_repeating(self._job_analysis, interval=21600, first=21600) # 6 hours
             app.job_queue.run_daily(callback=self._job_summary, time=dt_time(hour=23, minute=0))  # 23:00 daily
-            logger.info("✅ JobQueue scheduled: scalping(15m), medium(60m), swing(4h), news(10m), analysis(6h), summary(23:00)")
+            logger.info("✅ JobQueue scheduled: medium(60m), swing(4h), news(10m), health(30m), subs(1h), analysis(6h), summary(23:00) — scalping disabled")
         else:
             logger.error("❌ JobQueue not available!")
 
