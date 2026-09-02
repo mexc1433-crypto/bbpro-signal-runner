@@ -69,8 +69,8 @@ CHANNEL_RULES: Dict[str, Dict[str, Any]] = {
         "name": "القناة العامة",
         "min_signals": 1,
         "max_signals": 3,
-        "allowed_types": ["SCALPING", "MEDIUM"],
-        "blocked_types": ["SWING"],
+        "allowed_types": ["MEDIUM"],  # SCALPING removed
+        "blocked_types": ["SWING", "SCALPING"],
         "max_risk": "LOW",
         "min_confidence": 50,
         "profit_mode": "SMALL",
@@ -161,5 +161,5 @@ VIX_SYMBOL = "^VIX"  # مؤشر التذبذب - يعكس الخوف في الس
 # Advanced Features Configuration
 # ═══════════════════════════════════════════════════════════════
 MIN_MEXC_BALANCE = float(os.getenv("MIN_MEXC_BALANCE", "10"))
-SIGNAL_COOLDOWN_MINUTES = int(os.getenv("SIGNAL_COOLDOWN_MINUTES", "30"))
+SIGNAL_COOLDOWN_MINUTES = int(os.getenv("SIGNAL_COOLDOWN_MINUTES", "45"))
 MAX_SPREAD_PCT = float(os.getenv("MAX_SPREAD_PCT", "0.15"))

@@ -658,8 +658,8 @@ class CandleHunterSignalBot:
 
         # 🎯 FEATURE 2: Multi-Signal Confirmation (Soft Filter)
         # لو استراتيجيتين+ توافقوا → multi_confirmed = True (boost)
-        # لو استراتيجية واحدة بس بس confidence >= 70% → نمررها مع علامة single
-        # لو استراتيجية واحدة و confidence < 70% → نحجبها
+        # لو استراتيجية واحدة بس بس confidence >= 75% → نمررها مع علامة single
+        # لو استراتيجية واحدة و confidence < 75% → نحجبها
         direction_counts = {}
         for s in signals:
             d = s.get("signal_type", "")
@@ -673,14 +673,14 @@ class CandleHunterSignalBot:
                 s["multi_confirmed"] = True
                 s["confirming_strategies"] = count
                 confirmed_signals.append(s)
-            elif s.get("confidence", 0) >= 70:
+            elif s.get("confidence", 0) >= 75:
                 s["multi_confirmed"] = False
                 s["confirming_strategies"] = count
                 s["single_strategy"] = True
                 confirmed_signals.append(s)
                 logger.info(f"⚡ Single-strategy pass: {s.get('strategy_name')} {d} (conf={s.get('confidence', 0):.0f}%)")
             else:
-                logger.info(f"🚫 Filtered: {s.get('strategy_name')} {d} (only 1 strategy, conf={s.get('confidence', 0):.0f}% < 70%)")
+                logger.info(f"🚫 Filtered: {s.get('strategy_name')} {d} (only 1 strategy, conf={s.get('confidence', 0):.0f}% < 75%)")
 
         if not confirmed_signals:
             logger.info(f"📊 No signals passed multi-confirmation filter")
@@ -2069,7 +2069,7 @@ class CandleHunterSignalBot:
 
         # Setup schedules using PTB JobQueue (native async, no GC issues)
         if app.job_queue:
-            app.job_queue.run_repeating(self._job_scalping, interval=900, first=120)    # 15 min (first=2min)
+            # app.job_queue.run_repeating(self._job_scalping, interval=900, first=120)    # SCALPING DISABLED — medium + swing only
             app.job_queue.run_repeating(self._job_medium, interval=3600, first=3600)    # 60 min
             app.job_queue.run_repeating(self._job_swing, interval=14400, first=14400)  # 4 hours
             app.job_queue.run_repeating(self._job_news_check, interval=600, first=600) # 10 min

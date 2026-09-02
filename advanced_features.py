@@ -399,7 +399,7 @@ class SignalCooldown:
     """منع التوصيات المتتالية — كولداون بين كل إشارة"""
 
     def __init__(self):
-        self.cooldown_minutes = int(os.getenv("SIGNAL_COOLDOWN_MINUTES", "30"))
+        self.cooldown_minutes = int(os.getenv("SIGNAL_COOLDOWN_MINUTES", "45"))
         self.last_signal_time = None
 
     def can_send(self) -> bool:
