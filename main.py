@@ -2085,8 +2085,7 @@ class CandleHunterSignalBot:
         async def run_scheduler(app):
             logger.info("⏱️ Initial scan in 30 seconds...")
             await asyncio.sleep(30)
-            logger.info("🔄 Running initial scalping scan...")
-            await self.run_scalping_scan()
+            # SCALPING DISABLED — skipping initial scalping scan
             logger.info("🔄 Running initial medium scan...")
             await self.run_medium_scan()
             logger.info("✅ Initial scans complete — JobQueue takes over")
