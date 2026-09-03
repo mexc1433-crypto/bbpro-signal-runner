@@ -673,18 +673,22 @@ class CandleHunterSignalBot:
         for s in signals:
             d = s.get("signal_type", "")
             count = direction_counts.get(d, 0)
-            if count >= 2:
+            if count >= 2 and s.get("confidence", 0) >= 75:
+                # استراتيجيتين+ متوافقين + ثقة عالية = تأكيد مزدوج
                 s["multi_confirmed"] = True
                 s["confirming_strategies"] = count
                 confirmed_signals.append(s)
-            elif s.get("confidence", 0) >= 75:
+            elif count >= 2 and s.get("confidence", 0) < 75:
+                logger.info(f"🚫 Filtered: {s.get('strategy_name')} {d} (multi but weak, conf={s.get('confidence', 0):.0f}% < 75%)")
+            elif s.get("confidence", 0) >= 80:
+                # استراتيجية واحدة: لازم ثقة أعلى (80%) للتعويض
                 s["multi_confirmed"] = False
                 s["confirming_strategies"] = count
                 s["single_strategy"] = True
                 confirmed_signals.append(s)
                 logger.info(f"⚡ Single-strategy pass: {s.get('strategy_name')} {d} (conf={s.get('confidence', 0):.0f}%)")
             else:
-                logger.info(f"🚫 Filtered: {s.get('strategy_name')} {d} (only 1 strategy, conf={s.get('confidence', 0):.0f}% < 75%)")
+                logger.info(f"🚫 Filtered: {s.get('strategy_name')} {d} (only 1 strategy, conf={s.get('confidence', 0):.0f}% < 80%)")
 
         if not confirmed_signals:
             logger.info(f"📊 No signals passed multi-confirmation filter")
