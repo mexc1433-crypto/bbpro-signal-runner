@@ -128,7 +128,7 @@ class SignalTracker:
         self._save()
         logger.info(f"Tracking signal: {entry['id']} {entry['signal_type']} {entry['symbol']}")
 
-    def check_pending_signals(self, current_price: float) -> List[Dict]:
+    def check_pending_signals(self, current_price: float, candles: List[Dict] = None) -> List[Dict]:
         """فحص الإشارات المعلقة — مع Partial TP و Trailing Stop + TTL expiry"""
         updated = []
         now = datetime.now()
@@ -161,16 +161,29 @@ class SignalTracker:
             is_buy = sig["signal_type"] == "BUY"
             now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
 
-            hit_tp1 = tp1 > 0 and (current_price >= tp1 if is_buy else current_price <= tp1)
-            hit_tp2 = tp2 > 0 and (current_price >= tp2 if is_buy else current_price <= tp2)
-            hit_sl = current_price <= sl if is_buy else current_price >= sl
+            # قمة/قاع الفترة من شموع 15 دقيقة — الحركات السريعة ما بتفلتش
+            period_high = current_price
+            period_low = current_price
+            if candles:
+                try:
+                    created_dt = datetime.fromisoformat(sig.get("created_at", now.isoformat()))
+                    sig_candles = [c for c in candles if c["ts"] >= created_dt]
+                    if sig_candles:
+                        period_high = max(max(c["high"] for c in sig_candles), current_price)
+                        period_low = min(min(c["low"] for c in sig_candles), current_price)
+                except Exception:
+                    pass
+
+            hit_tp1 = tp1 > 0 and (period_high >= tp1 if is_buy else period_low <= tp1)
+            hit_tp2 = tp2 > 0 and (period_high >= tp2 if is_buy else period_low <= tp2)
+            hit_sl = period_low <= sl if is_buy else period_high >= sl
 
             # ===== FEATURE 3: Partial TP =====
             # TP1 → أغلق 50% من الصفقة (WIN_PARTIAL)
             if hit_tp1 and not sig.get("tp1_hit", False):
                 sig["tp1_hit"] = True
-                sig["tp1_price"] = current_price
-                sig["exit_price"] = current_price
+                sig["tp1_price"] = tp1
+                sig["exit_price"] = tp1
                 sig["exit_time"] = now_str
                 sig["result"] = "WIN"
                 sig["status"] = "CLOSED"
@@ -181,8 +194,8 @@ class SignalTracker:
             # TP2 → أغلق الصفقة بالكامل (WIN_FULL)
             elif hit_tp2 and not sig.get("tp2_hit", False) and not sig.get("tp1_hit", False):
                 sig["tp2_hit"] = True
-                sig["tp2_price"] = current_price
-                sig["exit_price"] = current_price
+                sig["tp2_price"] = tp2
+                sig["exit_price"] = tp2
                 sig["exit_time"] = now_str
                 sig["result"] = "WIN"
                 sig["status"] = "CLOSED"
@@ -230,7 +243,7 @@ class SignalTracker:
             elif hit_sl:
                 sig["status"] = "CLOSED"
                 sig["result"] = "LOSS"
-                sig["exit_price"] = current_price
+                sig["exit_price"] = sl
                 sig["exit_time"] = now_str
                 sig["close_type"] = "STOP_LOSS"
                 updated.append(sig)

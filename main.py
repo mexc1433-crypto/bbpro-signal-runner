@@ -273,7 +273,18 @@ class CandleHunterSignalBot:
         try:
             ticker = self.fetcher.fetch_ticker("XAU/USD")
             if ticker and ticker.get("last"):
-                updated = self.tracker.check_pending_signals(ticker["last"])
+                # شموع 15 دقيقة (آخر ساعتين) — المتتبع بيفحص القمة/القاع مش اللحظة بس
+                candles_15m = None
+                try:
+                    df15 = self.fetcher.fetch_ohlcv("XAU/USD", "15m", 8)
+                    if df15 is not None and not df15.empty:
+                        candles_15m = [
+                            {"ts": idx.to_pydatetime(), "high": float(h), "low": float(l)}
+                            for idx, h, l in zip(df15.index, df15["high"], df15["low"])
+                        ]
+                except Exception as e:
+                    logger.debug(f"15m candles for tracker failed: {e}")
+                updated = self.tracker.check_pending_signals(ticker["last"], candles_15m)
                 for s in updated:
                     logger.info(f"📋 Signal {s['id']} → {s['result']} (exit={s['exit_price']})")
                     # إرسال رسالة إغلاق الصفقة للقناة الخاصة
