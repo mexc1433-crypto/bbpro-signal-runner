@@ -276,8 +276,10 @@ class CandleHunterSignalBot:
                 # شموع 15 دقيقة (آخر ساعتين) — المتتبع بيفحص القمة/القاع مش اللحظة بس
                 candles_15m = None
                 try:
-                    df15 = self.fetcher.fetch_ohlcv("XAU/USD", "15m", 8)
+                    # fetch_ohlcv بترفض أقل من 20 شمعة — نجيب 40 ونأخذ آخر 8
+                    df15 = self.fetcher.fetch_ohlcv("XAU/USD", "15m", 40)
                     if df15 is not None and not df15.empty:
+                        df15 = df15.tail(8)  # آخر ساعتين
                         candles_15m = [
                             {"ts": idx.to_pydatetime(), "high": float(h), "low": float(l)}
                             for idx, h, l in zip(df15.index, df15["high"], df15["low"])
