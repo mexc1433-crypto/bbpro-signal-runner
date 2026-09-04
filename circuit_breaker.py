@@ -10,7 +10,8 @@ from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "circuit_breaker.json")
+DATA_FILE = os.path.join(os.getenv("STATE_DIR", os.path.dirname(os.path.abspath(__file__))), "circuit_breaker.json")
+os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
 
 
 class CircuitBreaker:
