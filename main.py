@@ -577,6 +577,8 @@ class CandleHunterSignalBot:
 
         # 📦 MAX CONCURRENT POSITIONS: الحماية الفعلية في الـ trade bot (بيتخطى التنفيذ لو في صفقة)
         # هنا warning فقط — الإشارات مستمرة للقنوات للمتداولين اليدويين
+        if os.getenv("TRADE_BOT_HEALTH_CHECK", "on").lower() in ("off", "false", "0"):
+            return  # trade bot stopped by owner — skip visibility check
         try:
             import requests as _req
             _tb_url = os.getenv("TRADE_BOT_URL", "https://bbpro-trade-bot-production.up.railway.app")
