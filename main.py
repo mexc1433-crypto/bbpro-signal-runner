@@ -577,20 +577,20 @@ class CandleHunterSignalBot:
 
         # 📦 MAX CONCURRENT POSITIONS: الحماية الفعلية في الـ trade bot (بيتخطى التنفيذ لو في صفقة)
         # هنا warning فقط — الإشارات مستمرة للقنوات للمتداولين اليدويين
-        if os.getenv("TRADE_BOT_HEALTH_CHECK", "on").lower() in ("off", "false", "0"):
-            return  # trade bot stopped by owner — skip visibility check
-        try:
-            import requests as _req
-            _tb_url = os.getenv("TRADE_BOT_URL", "https://bbpro-trade-bot-production.up.railway.app")
-            _resp = _req.get(f"{_tb_url}/positions", timeout=10)
-            if _resp.status_code == 200:
-                for _u in _resp.json().get("users", []):
-                    if _u.get("user") in ("", None) or _u.get("telegram_id") == 8533137153:
-                        _n = len(_u.get("positions", []))
-                        if _n >= self._max_concurrent_positions:
-                            logger.info(f"📦 Owner has {_n} open position(s) — trade bot will skip auto-execution; channel signals continue")
-        except Exception as e:
-            logger.warning(f"Position visibility check failed: {e}")
+        # (visibility check اختياري — بوت التداول متوقف بأمر المالك)
+        if os.getenv("TRADE_BOT_HEALTH_CHECK", "on").lower() not in ("off", "false", "0"):
+            try:
+                import requests as _req
+                _tb_url = os.getenv("TRADE_BOT_URL", "https://bbpro-trade-bot-production.up.railway.app")
+                _resp = _req.get(f"{_tb_url}/positions", timeout=10)
+                if _resp.status_code == 200:
+                    for _u in _resp.json().get("users", []):
+                        if _u.get("user") in ("", None) or _u.get("telegram_id") == 8533137153:
+                            _n = len(_u.get("positions", []))
+                            if _n >= self._max_concurrent_positions:
+                                logger.info(f"📦 Owner has {_n} open position(s) — trade bot will skip auto-execution; channel signals continue")
+            except Exception as e:
+                logger.warning(f"Position visibility check failed: {e}")
 
         # ⏱️ SIGNAL COOLDOWN: لو في كولداون ما تبعتش
         if not self.cooldown.can_send():
