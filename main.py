@@ -28,6 +28,7 @@ import logging
 import time
 import sys
 import os
+import json
 from datetime import datetime, time as dt_time
 from typing import Dict, List, Optional
 
@@ -1914,17 +1915,19 @@ class CandleHunterSignalBot:
     async def _job_health_monitor(self, context=None):
         """Health monitor: check all systems every 30 min"""
         try:
-            # Check Trade Bot
-            try:
-                import httpx
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(
-                        os.getenv("TRADE_BOT_URL", "https://bbpro-trade-bot-production.up.railway.app") + "/stats",
-                        timeout=10
-                    )
-                    trade_bot_ok = resp.status_code == 200
-            except:
-                trade_bot_ok = False
+            # Check Trade Bot (skip if TRADE_BOT_HEALTH_CHECK=off — bot stopped by owner)
+            trade_bot_ok = True
+            if os.getenv("TRADE_BOT_HEALTH_CHECK", "on").lower() not in ("off", "false", "0"):
+                try:
+                    import httpx
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(
+                            os.getenv("TRADE_BOT_URL", "https://bbpro-trade-bot-production.up.railway.app") + "/stats",
+                            timeout=10
+                        )
+                        trade_bot_ok = resp.status_code == 200
+                except:
+                    trade_bot_ok = False
 
             # Check MEXC API (owner)
             mexc_ok = True
@@ -2147,6 +2150,67 @@ class CandleHunterSignalBot:
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(b'{"status":"ok","bot":"candle-hunter"}')
+
+            def do_GET(self):
+                from urllib.parse import urlparse, parse_qs
+                parsed = urlparse(self.path)
+                if parsed.path == "/signals/state":
+                    qs = parse_qs(parsed.query)
+                    if qs.get("secret", [""])[0] != os.getenv("SIGNALS_API_SECRET", ""):
+                        self.send_response(401)
+                        self.end_headers()
+                        return
+                    data_file = os.path.join(
+                        os.getenv("STATE_DIR", os.path.dirname(os.path.abspath(__file__))),
+                        "signals_data.json")
+                    try:
+                        size = os.path.getsize(data_file)
+                        content = open(data_file).read()
+                        info = {"exists": True, "size": size,
+                                "count": len(json.loads(content)) if size > 2 else 0,
+                                "state_dir": os.getenv("STATE_DIR", "")}
+                    except Exception as e:
+                        info = {"exists": False, "error": str(e),
+                                "state_dir": os.getenv("STATE_DIR", "")}
+                    body = json.dumps(info).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif parsed.path == "/signals/latest":
+                    qs = parse_qs(parsed.query)
+                    if qs.get("secret", [""])[0] != os.getenv("SIGNALS_API_SECRET", ""):
+                        self.send_response(401)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(b'{"error":"unauthorized"}')
+                        return
+                    data_file = os.path.join(
+                        os.getenv("STATE_DIR", os.path.dirname(os.path.abspath(__file__))),
+                        "signals_data.json")
+                    try:
+                        with open(data_file, "r", encoding="utf-8") as f:
+                            signals = json.load(f)
+                    except Exception:
+                        signals = []
+                    since = qs.get("since", [""])[0]
+                    if since:
+                        signals = [s for s in signals if str(s.get("created_at", "")) > since]
+                    limit = min(int(qs.get("limit", ["10"])[0]), 50)
+                    signals = sorted(signals, key=lambda s: str(s.get("created_at", "")), reverse=True)[:limit]
+                    body = json.dumps({"signals": signals}, ensure_ascii=False).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"status":"ok","bot":"candle-hunter"}')
+
             def log_message(self, format, *args):
                 pass
         
