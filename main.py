@@ -542,6 +542,36 @@ class CandleHunterSignalBot:
                 continue
         return False
 
+    def _log_rejected_signal(self, signal: Dict, threshold: int):
+        """تسجيل الإشارات المرفوضة داخلياً للتحليل — لا تُنشر ولا تدخل إحصائيات الأداء"""
+        try:
+            import json as _json
+            path = os.path.join(os.getenv("STATE_DIR", os.path.dirname(os.path.abspath(__file__))), "rejected_signals.json")
+            entries = []
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    entries = _json.load(f)
+            except Exception:
+                entries = []
+            entries.append({
+                "id": f"rej_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                "symbol": signal.get("symbol", "XAU/USD"),
+                "signal_type": signal.get("signal_type", "BUY"),
+                "entry_price": signal.get("entry_price", 0),
+                "stop_loss": signal.get("stop_loss", 0),
+                "take_profit_1": signal.get("take_profit_1", 0),
+                "strategy_name": signal.get("strategy_name", "Unknown"),
+                "confidence": signal.get("confidence", 0),
+                "rejected_reason": f"confidence < MIN_CONFIDENCE ({threshold}%)",
+                "created_at": datetime.now().isoformat(),
+            })
+            # الاحتفاظ بآخر 500 إشارة مرفوضة فقط
+            entries = entries[-500:]
+            with open(path, "w", encoding="utf-8") as f:
+                _json.dump(entries, f, ensure_ascii=False, indent=1)
+        except Exception as e:
+            logger.warning(f"Failed to log rejected signal: {e}")
+
     def _confirm_signal(self, signal: Dict) -> bool:
         """تأكيد الإشارة: شروط إضافية قبل الإرسال"""
         confidence = signal.get("confidence", 0)
@@ -732,11 +762,18 @@ class CandleHunterSignalBot:
         logger.info(f"📊 {len(confirmed_signals)} confirmed → {len(filtered_signals)} after filtering")
 
         sent_directions = set()
+        min_conf_gate = int(os.getenv("MIN_CONFIDENCE", "85"))
         for signal in filtered_signals:
             # منع تكرار نفس الاتجاه داخل نفس المسح
             sig_dir = signal.get("signal_type", "")
             if sig_dir in sent_directions:
                 logger.info(f"🚫 Skip duplicate direction in same scan: {sig_dir}")
+                continue
+
+            # 🛡️ QUALITY FILTER: عتبة ثقة النشر — الإشارات الأضعف تُسجل داخلياً فقط
+            if signal.get("confidence", 0) < min_conf_gate:
+                logger.info(f"🛡️ Quality gate: {signal.get('strategy_name')} {sig_dir} conf={signal.get('confidence', 0):.0f}% < {min_conf_gate}% — not published (logged for analysis)")
+                self._log_rejected_signal(signal, min_conf_gate)
                 continue
 
             # 📐 DYNAMIC SL/TP (ATR-based): تعديل SL/TP حسب التقلب الحالي
