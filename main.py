@@ -347,7 +347,7 @@ class CandleHunterSignalBot:
                 try:
                     if not self.weekly_reporter:
                         self.weekly_reporter = WeeklyReporter(
-                            self.tracker, self.bot, self.private_channel, self.admin_id
+                            self.tracker, self.bot, self.private_channel, self.admin_id, self.public_channel
                         )
                     if self.weekly_reporter.should_run_now():
                         await self.weekly_reporter.send_weekly_report()

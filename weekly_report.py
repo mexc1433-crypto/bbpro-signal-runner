@@ -12,11 +12,12 @@ logger = logging.getLogger(__name__)
 class WeeklyReporter:
     """تقرير الأداء الأسبوعي التلقائي"""
 
-    def __init__(self, tracker, bot=None, channel_id=None, admin_id=None):
+    def __init__(self, tracker, bot=None, channel_id=None, admin_id=None, public_channel_id=None):
         self.tracker = tracker
         self.bot = bot
         self.channel_id = channel_id
         self.admin_id = admin_id
+        self.public_channel_id = public_channel_id
         self.last_report_date = None
 
     async def send_weekly_report(self):
@@ -35,6 +36,18 @@ class WeeklyReporter:
         try:
             stats = self.tracker.get_performance_stats(days=7)
             report = self._format_report(stats)
+
+            # إرسال نسخة تسويقية للقناة العامة (إثبات الأداء للمشتركين المحتملين)
+            if self.bot and self.public_channel_id:
+                try:
+                    await self.bot.send_message(
+                        chat_id=self.public_channel_id,
+                        text=self._format_public_report(stats),
+                        parse_mode='HTML',
+                    )
+                    logger.info("📊 Weekly report sent to PUBLIC channel")
+                except Exception as e:
+                    logger.warning(f"Public weekly report failed: {e}")
 
             # إرسال للقناة الخاصة
             if self.bot and self.channel_id:
@@ -111,3 +124,33 @@ class WeeklyReporter:
         if self.last_report_date == today_str:
             return False
         return True
+
+    def _format_public_report(self, stats: Dict) -> str:
+        """نسخة تسويقية للقناة العامة — إثبات أداء + دعوة اشتراك"""
+        total = stats.get("total_signals", 0)
+        wins = stats.get("wins", 0)
+        win_rate = stats.get("win_rate", 0)
+        best_pnl = stats.get("best_pnl", 0)
+        avg_pnl = stats.get("avg_pnl", 0)
+
+        now = datetime.now()
+        week_start = (now - timedelta(days=7)).strftime("%d/%m")
+        week_end = now.strftime("%d/%m")
+
+        msg = "📊 تقرير الأداء الأسبوعي\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += f"📅 {week_start} → {week_end}\n\n"
+        if total > 0:
+            msg += f"🎯 إشارات نشرت: {total}\n"
+            msg += f"✅ صفقات رابحة: {wins}\n"
+            msg += f"🏆 نسبة النجاح: {win_rate:.0f}%\n"
+            msg += f"📈 متوسط العائد: {avg_pnl:+.2f}%\n"
+            msg += f"💰 أفضل صفقة: {best_pnl:+.2f}%\n\n"
+            msg += "الجودة قبل الكمية — إشارات مفلترة بثقة 85%+ فقط\n\n"
+        else:
+            msg += "لا إشارات كافية هذا الأسبوع — الجودة قبل الكمية\n\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += "🚀 اشترك في القناة الخاصة لتصلك الإشارات لحظياً\n"
+        msg += "⚠️ ليست نصيحة استثمارية\n"
+        msg += "🤖 صياد الشمعات | Candle Hunter"
+        return msg
