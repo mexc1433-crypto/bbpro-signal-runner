@@ -939,6 +939,7 @@ class CandleHunterSignalBot:
     async def _send_close_notification(self, signal: Dict):
         """رسالة إغلاق الصفقة لما TP أو SL يوصل"""
         is_win = signal.get("result") == "WIN"
+        is_partial_tp1 = signal.get("close_type") == "PARTIAL_TP1"
         emoji = "✅" if is_win else "❌"
         result_text = "ضرب الهدف 🎯" if is_win else "ضرب الستوب 🛑"
         direction = "شراء" if signal.get("signal_type") == "BUY" else "بيع"
@@ -956,6 +957,19 @@ class CandleHunterSignalBot:
         msg += f"💵 الدخول: {entry:,.2f}\n"
         msg += f"🏁 الخروج: {exit_price:,.2f}\n"
         msg += f"📈 النتيجة: {sign}{pnl_pct:.2f}%\n\n"
+        if is_partial_tp1:
+            # 🛡️ إدارة المخاطر عند TP1 — الاتفاق مع المالك
+            tp2 = signal.get("take_profit_2", 0)
+            tp3 = signal.get("take_profit_3", 0)
+            msg += "🛡️ خطوات إدارة الصفقة:\n"
+            msg += "• أغلق نص الحجم الآن (أول هدف ضمنت)\n"
+            msg += f"• حرّك الستوب لنقطة الدخول ${entry:,.2f} — الصفقة بقت بلا خسارة\n"
+            targets = f"TP2 ${tp2:,.2f}" if tp2 else ""
+            if tp3:
+                targets += f" | TP3 ${tp3:,.2f}"
+            if targets:
+                msg += f"• سيب النص التاني يجري لـ {targets}\n"
+            msg += "\n"
         msg += f"📅 {signal.get('exit_time', datetime.now().strftime('%Y-%m-%d %H:%M'))}\n"
         msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         msg += "🤖 صياد الشمعات | Candle Hunter"
