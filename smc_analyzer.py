@@ -739,3 +739,124 @@ class SMCAnalyzer:
         except Exception as e:
             logger.error(f"SMC format error: {e}")
             return "⚠️ خطأ في تنسيق تقرير SMC"
+
+    # ═══════════════════════════════════════════════════
+    # Premium/Discount Zone — قاعدة SMC الذهبية:
+    # شراء بس من منطقة الخصم (Discount)، بيع بس من منطقة العلاوة (Premium)
+    # ═══════════════════════════════════════════════════
+    def premium_discount(self, df: pd.DataFrame, lookback: int = 100) -> Dict:
+        """منطقة السعر الحالية من مدى الموجة الأخيرة"""
+        try:
+            if df is None or len(df) < 30:
+                return {"zone": "UNKNOWN", "position": 0.5}
+            window = df.tail(lookback)
+            hi = float(window["high"].max())
+            lo = float(window["low"].min())
+            if hi <= lo:
+                return {"zone": "UNKNOWN", "position": 0.5}
+            mid = (hi + lo) / 2.0
+            price = float(df["close"].iloc[-1])
+            pos = (price - lo) / (hi - lo)  # 0 = قاع المدى، 1 = قمته
+            return {
+                "zone": "PREMIUM" if pos > 0.5 else "DISCOUNT",
+                "position": round(pos, 3),
+                "high": hi, "low": lo, "mid": mid, "price": price,
+            }
+        except Exception as e:
+            logger.warning(f"premium_discount error: {e}")
+            return {"zone": "UNKNOWN", "position": 0.5}
+
+    def apply_premium_discount(self, signal: Dict, df: pd.DataFrame) -> Dict:
+        """تعديل ثقة الإشارة حسب منطقة السعر:
+        BUY في Premium = شراء غالي → عقوبة
+        BUY في Discount = شراء رخيص → مكافأة (والعكس للبيع)"""
+        try:
+            zone = self.premium_discount(df)
+            sig_dir = signal.get("signal_type", "")
+            pos = zone.get("position", 0.5)
+            old_conf = signal.get("confidence", 50)
+            signal["pd_zone"] = zone.get("zone", "UNKNOWN")
+            signal["pd_position"] = pos
+
+            if zone.get("zone") == "UNKNOWN":
+                return {"adjusted": False}
+
+            adjustment = 0
+            if sig_dir == "BUY":
+                # كل ما نطلع لفوق في المدى، الشراء أغلى
+                if pos > 0.75:
+                    adjustment = -8          # قمة المدى — شراء غالي جداً
+                elif pos > 0.5:
+                    adjustment = -4          # Premium
+                elif pos < 0.35:
+                    adjustment = +5          # قاع المدى — شراء رخيص
+            elif sig_dir == "SELL":
+                if pos < 0.25:
+                    adjustment = -8          # قاع المدى — بيع رخيص جداً
+                elif pos < 0.5:
+                    adjustment = -4          # Discount
+                elif pos > 0.65:
+                    adjustment = +5          # قمة المدى — بيع غالي
+
+            if adjustment:
+                signal["confidence"] = max(30, min(95, old_conf + adjustment))
+                logger.info(f"📐 Premium/Discount [{zone['zone']} pos={pos:.2f}] {sig_dir}: {adjustment:+d}% → {signal['confidence']:.0f}%")
+                return {"adjusted": True, "old": old_conf, "new": signal["confidence"], **zone}
+            return {"adjusted": False, **zone}
+        except Exception as e:
+            logger.warning(f"apply_premium_discount error: {e}")
+            return {"adjusted": False}
+
+    # ═══════════════════════════════════════════════════
+    # Liquidity Targets — أهداف عند برك السيولة (قمم/قيعان متساوية)
+    # السوق بيجري ناحية السيولة: نحط TP قبل البركة مش بعيد عنها
+    # ═══════════════════════════════════════════════════
+    def liquidity_targets(self, df: pd.DataFrame, entry: float, sl: float,
+                          direction: str, atr: float, min_rr: float = 1.2) -> Optional[Dict]:
+        """يدور على برك السيولة (قمم/قيعان ارتداد حقيقية) فوق/تحت الدخول
+        ويحط TP1 قدام أقرب بركة تعطي R:R كويس. مفيش → None (نستخدم ATR العادي)"""
+        try:
+            if df is None or len(df) < 50 or atr <= 0:
+                return None
+            lookback = df.tail(200)
+            highs = lookback["high"].tolist()
+            lows = lookback["low"].tolist()
+
+            is_buy = direction.upper() in ("BUY", "LONG", "BULLISH")
+            risk = abs(entry - sl)
+            if risk <= 0:
+                return None
+
+            # قمم/قيعان الارتداد (Pivot): قمة أعلى من جيرانها
+            k = 3
+            pivot_highs, pivot_lows = [], []
+            for i in range(k, len(highs) - k):
+                if highs[i] == max(highs[i-k:i+k+1]):
+                    pivot_highs.append(highs[i])
+                if lows[i] == min(lows[i-k:i+k+1]):
+                    pivot_lows.append(lows[i])
+
+            if is_buy:
+                # برك السيولة فوق الدخول: قمم ارتداد لسه مش مكسورة (فوق السعر الحالي)
+                candidates = sorted(set(h for h in pivot_highs if h > entry + (0.5 * atr)))
+                for pool in candidates:
+                    tp1 = pool - (0.25 * atr)   # ناخد الجَر قدام البركة
+                    if tp1 <= entry + (0.5 * risk):
+                        continue
+                    rr = (tp1 - entry) / risk
+                    if rr >= min_rr:
+                        return {"tp1": round(tp1, 2), "pool": round(pool, 2), "rr": round(rr, 2)}
+                return None
+            else:
+                candidates = sorted(set(l for l in pivot_lows if l < entry - (0.5 * atr)), reverse=True)
+                for pool in candidates:
+                    tp1 = pool + (0.25 * atr)
+                    if tp1 >= entry - (0.5 * risk):
+                        continue
+                    rr = (entry - tp1) / risk
+                    if rr >= min_rr:
+                        return {"tp1": round(tp1, 2), "pool": round(pool, 2), "rr": round(rr, 2)}
+                return None
+        except Exception as e:
+            logger.warning(f"liquidity_targets error: {e}")
+            return None

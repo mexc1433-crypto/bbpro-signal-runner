@@ -69,7 +69,7 @@ from smc_analyzer import SMCAnalyzer
 from mtf_confluence import MTFConfluence
 from advanced_features import (
     BalanceChecker, SmartPositionSizer, ConflictResolver,
-    FearGreedIndex, DXYFilter, SpreadFilter,
+    FearGreedIndex, DXYFilter, SpreadFilter, US10YFilter,
     SignalCooldown, MarketHoursManager, AutoRestartManager,
 )
 from weekly_report import WeeklyReporter
@@ -130,6 +130,7 @@ class CandleHunterSignalBot:
         self.conflict_resolver = ConflictResolver()
         self.fear_greed = FearGreedIndex()
         self.dxy_filter = DXYFilter(self.fetcher)
+        self.us10y_filter = US10YFilter(self.fetcher)
         self.spread_filter = SpreadFilter(self.fetcher)
         self.cooldown = SignalCooldown()
         self.market_hours = MarketHoursManager()
@@ -470,8 +471,11 @@ class CandleHunterSignalBot:
                         logger.info(f"🚫 Volatility filter: {vol_check['reason']}")
                         continue
 
+                    _blacklist = [s.strip() for s in os.getenv("STRATEGY_BLACKLIST", "").split(",") if s.strip()]
                     for strat_name in strategy_names:
                         if strat_name not in self.strategies:
+                            continue
+                        if strat_name in _blacklist:
                             continue
                         try:
                             strat_config = self.strategies[strat_name]
@@ -508,6 +512,42 @@ class CandleHunterSignalBot:
     # ═══════════════════════════════════════════════════════════
     # Signal Processing & Distribution
     # ═══════════════════════════════════════════════════════════
+
+    def _confirm_candle_gate(self, signal: Dict) -> Dict:
+        """🕯️ شمعة التأكيد: آخر شمعة 15m مقفولة توافق الاتجاه،
+        والسعر لسه قريب من الدخول (مجاش الفرصة واتفوتت).
+        الشراء لازم شمعة صاعدة، البيع شمعة هابطة."""
+        try:
+            df = self.fetcher.fetch_ohlcv("15m", limit=6)
+            if df is None or len(df) < 3:
+                return {"ok": True, "reason": "no_data"}  # مفيش داتا = مش بنمنع
+
+            last_closed = df.iloc[-2]  # الأخيرة لسه بتتشكل
+            sig_dir = signal.get("signal_type", "")
+            entry = signal.get("entry_price", 0)
+            current = float(df["close"].iloc[-1])
+
+            # 1) اتجاه الشمعة المقفولة
+            bullish = float(last_closed["close"]) > float(last_closed["open"])
+            if sig_dir == "BUY" and not bullish:
+                return {"ok": False, "reason": "last 15m candle bearish"}
+            if sig_dir == "SELL" and bullish:
+                return {"ok": False, "reason": "last 15m candle bullish"}
+
+            # 2) السعر لسه قريب من الدخول (ما يكفيش المفروض) — 0.6x ATR
+            try:
+                hl = df["high"] - df["low"]
+                atr15 = float(hl.iloc[-5:].mean())
+            except Exception:
+                atr15 = 0
+            if entry > 0 and atr15 > 0:
+                drift = abs(current - entry)
+                if drift > (0.6 * atr15):
+                    return {"ok": False, "reason": f"price ran away ({drift:.2f} > 0.6×ATR)"}
+
+            return {"ok": True, "reason": f"candle confirmed, drift={abs(current-entry):.2f}"}
+        except Exception as e:
+            return {"ok": True, "reason": f"gate_error({e})"}  # fail-open
 
     def _filter_distance(self, signal: Dict) -> bool:
         """فلتر المسافة: لو الفرق بين الدخول والستوب أقل من 0.3% نتجاهل"""
@@ -601,14 +641,15 @@ class CandleHunterSignalBot:
         if confidence < 55:
             logger.info(f"🚫 Low confidence: {confidence}% < 55%")
             return False
-        # R:R لا يقل عن 1:1
+        # R:R لا يقل عن 1:1.5 — خسارة واحدة ما تاكلش ربحين
         entry = signal.get("entry_price", 0)
         tp2 = signal.get("take_profit_2", 0)
         sl = signal.get("stop_loss", 0)
+        min_rr = float(os.getenv("MIN_RR", "1.5"))
         if entry > 0 and sl > 0 and tp2 > 0:
             rr = abs(tp2 - entry) / abs(entry - sl)
-            if rr < 1.0:
-                logger.info(f"🚫 Low R:R: 1:{rr:.1f} < 1:1.0")
+            if rr < min_rr:
+                logger.info(f"🚫 Low R:R: 1:{rr:.1f} < 1:{min_rr}")
                 return False
         return True
 
@@ -690,6 +731,8 @@ class CandleHunterSignalBot:
         # 💵 FEATURE 10: DXY Correlation — تعديل حسب قوة الدولار
         for signal in signals:
             self.dxy_filter.apply(signal)
+            # 🏦 FEATURE 20: US10Y Real Yields — العائد الحقيقي بيعصر الذهب
+            self.us10y_filter.apply(signal)
 
         # 🤖 FEATURE 15: AI News Sentiment — Groq AI تحليل الأخبار
         ai_adjustment = 0
@@ -784,6 +827,11 @@ class CandleHunterSignalBot:
         logger.info(f"📊 {len(confirmed_signals)} confirmed → {len(filtered_signals)} after filtering")
 
         sent_directions = set()
+        # 📐 بيانات 1h لمنطقة Premium/Discount (مرة واحدة للمسح كله)
+        try:
+            _df_pd = self.fetcher.fetch_ohlcv("1h", limit=150)
+        except Exception:
+            _df_pd = None
         min_conf_gate = int(os.getenv("MIN_CONFIDENCE", "85"))
         # 🔒 DEAD-HOURS GATE: عتبة أعلى في الساعات الضعيفة (آسيوي/ميت) — إشارات كاذبة أقل
         try:
@@ -800,6 +848,13 @@ class CandleHunterSignalBot:
             if sig_dir in sent_directions:
                 logger.info(f"🚫 Skip duplicate direction in same scan: {sig_dir}")
                 continue
+
+            # 📐 PREMIUM/DISCOUNT: شراء من الخصم، بيع من العلاوة — قبل بوابة الثقة
+            try:
+                if _df_pd is not None and len(_df_pd) >= 30:
+                    self.smc.apply_premium_discount(signal, _df_pd)
+            except Exception as _pe:
+                logger.debug(f"Premium/Discount skipped: {_pe}")
 
             # 🛡️ QUALITY FILTER: عتبة ثقة النشر — الإشارات الأضعف تُسجل داخلياً فقط
             if signal.get("confidence", 0) < min_conf_gate:
@@ -823,6 +878,17 @@ class CandleHunterSignalBot:
                     logger.info(f"🧠 SMC gate passed: {sig_dir} confluence {gate['score']}/{gate.get('max', 6)}")
                 except Exception as e:
                     logger.warning(f"SMC gate check failed (fail-open): {e}")
+
+            # 🕯️ CONFIRMATION CANDLE: آخر شمعة 15m مقفولة لازم توافق الاتجاه
+            if os.getenv("CONFIRM_CANDLE", "1") == "1":
+                try:
+                    _conf = self._confirm_candle_gate(signal)
+                    if not _conf["ok"]:
+                        logger.info(f"🕯️ Confirm-candle gate: {sig_dir} {_conf['reason']} — not published")
+                        self._log_rejected_signal(signal, min_conf_gate, reason=_conf["reason"])
+                        continue
+                except Exception as _ce:
+                    logger.debug(f"Confirm candle skipped: {_ce}")
 
             # 📐 DYNAMIC SL/TP (ATR-based): تعديل SL/TP حسب التقلب الحالي
             try:
@@ -851,6 +917,26 @@ class CandleHunterSignalBot:
                             signal["take_profit_1"] = round(entry - (atr * tp1_mult), 2)
                             signal["take_profit_2"] = round(entry - (atr * tp2_mult), 2)
                         logger.info(f"📐 ATR SL/TP: atr={atr:.2f} ({atr_pct:.2f}%) SL={signal['stop_loss']} TP1={signal['take_profit_1']} TP2={signal['take_profit_2']}")
+
+                        # 💧 LIQUIDITY TARGETS: TP1 عند أقرب بركة سيولة تعطي R:R أحسن
+                        try:
+                            _df_liq = self.fetcher.fetch_ohlcv("1h", limit=250)
+                            if _df_liq is not None:
+                                _lt = self.smc.liquidity_targets(
+                                    _df_liq, entry, signal["stop_loss"], sig_dir, atr
+                                )
+                                if _lt:
+                                    # ما نحطش TP أبعد من TP2 الأصلي (السيولة ممكن تبقى بعيدة)
+                                    if _lt["tp1"] and (
+                                        (is_buy and _lt["tp1"] < signal["take_profit_2"]) or
+                                        ((not is_buy) and _lt["tp1"] > signal["take_profit_2"])
+                                    ):
+                                        old_tp1 = signal["take_profit_1"]
+                                        signal["take_profit_1"] = _lt["tp1"]
+                                        signal["liquidity_pool"] = _lt["pool"]
+                                        logger.info(f"💧 Liquidity TP1: {old_tp1} → {_lt['tp1']} (pool={_lt['pool']}, RR={_lt['rr']})")
+                        except Exception as _le:
+                            logger.debug(f"Liquidity targets skipped: {_le}")
             except Exception as e:
                 logger.warning(f"ATR adjustment failed: {e}")
 

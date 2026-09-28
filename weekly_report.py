@@ -107,6 +107,20 @@ class WeeklyReporter:
             if best_strategy != "N/A":
                 msg += f"🏆 أفضل استراتيجية: {best_strategy}\n"
 
+        # 🎯 معايرة الثقة — للنسخة التفصيلية (الخاصة + الأدمن)
+        try:
+            calib = self.tracker.get_calibration(days=30)
+            has_calib = any(v["signals"] > 0 for v in calib.values())
+            if has_calib:
+                msg += "\n🎯 معايرة الثقة (30 يوم):\n"
+                for bucket, v in calib.items():
+                    if v["signals"] == 0:
+                        continue
+                    wr = f"{v['win_rate']:.0f}%" if v["win_rate"] is not None else "—"
+                    msg += f"  • {bucket}% → {v['signals']} إشارة | نجاح فعلي {wr}\n"
+        except Exception:
+            pass
+
         msg += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         msg += "⚠️ ليست نصيحة استثمارية\n"
         msg += "🤖 صياد الشمعات | Candle Hunter"

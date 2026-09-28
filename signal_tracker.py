@@ -516,6 +516,46 @@ class SignalTracker:
 
         return msg
 
+    def get_calibration(self, days: int = 30) -> Dict:
+        """🎯 معايرة الثقة: هل الـ 85% بتحقق 85% فعلًا؟
+        بنقسم الإشارات المقفولة على شرائح الثقة المتوقعة ونشوف نسبة النجاح الفعلية."""
+        cutoff = datetime.now() - timedelta(days=days)
+        buckets = {
+            "85-89": {"wins": 0, "losses": 0, "timeouts": 0},
+            "90-94": {"wins": 0, "losses": 0, "timeouts": 0},
+            "95-100": {"wins": 0, "losses": 0, "timeouts": 0},
+        }
+        for s in self.signals:
+            if s.get("status") != "CLOSED":
+                continue
+            try:
+                if datetime.fromisoformat(s.get("created_at", "")) < cutoff:
+                    continue
+            except Exception:
+                continue
+            conf = s.get("confidence", 0)
+            if conf < 85:
+                continue
+            key = "85-89" if conf < 90 else ("90-94" if conf < 95 else "95-100")
+            res = s.get("result", "")
+            if res == "WIN":
+                buckets[key]["wins"] += 1
+            elif res == "LOSS":
+                buckets[key]["losses"] += 1
+            else:
+                buckets[key]["timeouts"] += 1
+
+        out = {}
+        for key, b in buckets.items():
+            total = b["wins"] + b["losses"] + b["timeouts"]
+            decided = b["wins"] + b["losses"]
+            out[key] = {
+                "signals": total,
+                "wins": b["wins"], "losses": b["losses"], "timeouts": b["timeouts"],
+                "win_rate": round(b["wins"] / decided * 100, 1) if decided else None,
+            }
+        return out
+
     def get_pending_signals(self) -> List[Dict]:
         """جلب كل الإشارات المعلقة — للـ pre-close alerts"""
         return [s for s in self.signals if s.get("status") == "PENDING"]

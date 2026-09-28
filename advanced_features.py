@@ -579,3 +579,98 @@ class AutoRestartManager:
         if delta.days > 0:
             return f"{delta.days}d {hours}h {minutes}m"
         return f"{hours}h {minutes}m"
+
+
+# ═══════════════════════════════════════════════════
+# FEATURE 20: US10Y Real Yields Filter
+# العائد على السندات — أقوى محرك ماكرو للذهب
+# العائد الحقيقي صاعد بقوة = الذهب بيتعرض لضغط بيع
+# ═══════════════════════════════════════════════════
+class US10YFilter:
+    """فلتر عائد السندات الأمريكية 10 سنوات (^TNX)"""
+
+    def __init__(self, fetcher=None):
+        self.fetcher = fetcher
+        self.cache = None
+        self.cache_time = None
+        self.cache_ttl = 3600  # ساعة
+
+    def get_yield_trend(self) -> Dict:
+        """اتجاه عائد السندات + التغير في 5 أيام"""
+        try:
+            if self.cache and self.cache_time:
+                if (datetime.now() - self.cache_time).seconds < self.cache_ttl:
+                    return self.cache
+
+            resp = requests.get(
+                "https://query1.finance.yahoo.com/v8/finance/chart/%5ETNX",
+                params={"range": "1mo", "interval": "1d"},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return {"trend": "UNKNOWN", "change": 0}
+
+            data = resp.json().get("chart", {}).get("result", [{}])[0]
+            quotes = data.get("indicators", {}).get("quote", [{}])[0].get("close", [])
+            closes = [c for c in quotes if c is not None]
+
+            if len(closes) < 6:
+                return {"trend": "UNKNOWN", "change": 0}
+
+            current = closes[-1]
+            # متوسط 5 أيام سابقة — التغير الأسبوعي أهم من اليومي
+            prev5 = sum(closes[-6:-1]) / 5
+            change_pct = ((current - prev5) / prev5) * 100
+
+            if change_pct > 3.0:
+                trend = "STRONG_UP"
+            elif change_pct > 0.5:
+                trend = "UP"
+            elif change_pct < -3.0:
+                trend = "STRONG_DOWN"
+            elif change_pct < -0.5:
+                trend = "DOWN"
+            else:
+                trend = "FLAT"
+
+            result = {"trend": trend, "change": change_pct, "value": current}
+            self.cache = result
+            self.cache_time = datetime.now()
+            logger.info(f"🏦 US10Y: {trend} ({change_pct:+.2f}%, yield={current:.2f}%)")
+            return result
+
+        except Exception as e:
+            logger.warning(f"US10Y fetch failed: {e}")
+            return {"trend": "UNKNOWN", "change": 0}
+
+    def apply(self, signal: Dict) -> Dict:
+        """العائد الحقيقي صاعد بقوة = ضغط على الذهب → عقوبة على الشراء"""
+        y = self.get_yield_trend()
+        trend = y.get("trend", "UNKNOWN")
+        signal_dir = signal.get("signal_type", "")
+        old_conf = signal.get("confidence", 50)
+
+        if trend == "UNKNOWN":
+            return {"adjusted": False}
+
+        signal["us10y_trend"] = trend
+
+        if trend == "STRONG_UP" and signal_dir == "BUY":
+            signal["confidence"] = max(30, old_conf - 8)
+            logger.info(f"🏦 US10Y penalty: BUY -8% (yields={trend})")
+            return {"adjusted": True, "old": old_conf, "new": signal["confidence"]}
+        elif trend == "STRONG_UP" and signal_dir == "SELL":
+            signal["confidence"] = min(95, old_conf + 4)
+            logger.info(f"🏦 US10Y boost: SELL +4% (yields={trend})")
+            return {"adjusted": True, "old": old_conf, "new": signal["confidence"]}
+        elif trend == "STRONG_DOWN" and signal_dir == "BUY":
+            signal["confidence"] = min(95, old_conf + 4)
+            logger.info(f"🏦 US10Y boost: BUY +4% (yields={trend})")
+            return {"adjusted": True, "old": old_conf, "new": signal["confidence"]}
+        elif trend == "STRONG_DOWN" and signal_dir == "SELL":
+            signal["confidence"] = max(30, old_conf - 8)
+            logger.info(f"🏦 US10Y penalty: SELL -8% (yields={trend})")
+            return {"adjusted": True, "old": old_conf, "new": signal["confidence"]}
+
+        return {"adjusted": False}
