@@ -1,0 +1,167 @@
+{
+  "generated_at": "2026-09-28T23:40:24.917313",
+  "results": {
+    "15m": {
+      "scalping": {
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "timeouts": 0,
+        "total_r": 0.0,
+        "conf_sum": 0.0,
+        "win_rate": null,
+        "avg_r": null,
+        "avg_conf": null,
+        "secs": 75.0
+      }
+    },
+    "1h": {
+      "trend_following": {
+        "trades": 250,
+        "wins": 128,
+        "losses": 116,
+        "timeouts": 6,
+        "total_r": 20.749999659451692,
+        "conf_sum": 20975.0,
+        "win_rate": 52.5,
+        "avg_r": 0.08,
+        "avg_conf": 84.0,
+        "secs": 78.0
+      },
+      "mean_reversion": {
+        "trades": 120,
+        "wins": 40,
+        "losses": 71,
+        "timeouts": 9,
+        "total_r": -11.33722158223818,
+        "conf_sum": 8252.0,
+        "win_rate": 36.0,
+        "avg_r": -0.09,
+        "avg_conf": 69.0,
+        "secs": 87.0
+      },
+      "momentum": {
+        "trades": 732,
+        "wins": 381,
+        "losses": 327,
+        "timeouts": 24,
+        "total_r": 98.62499914167134,
+        "conf_sum": 50212.0,
+        "win_rate": 53.8,
+        "avg_r": 0.13,
+        "avg_conf": 69.0,
+        "secs": 45.0
+      },
+      "supertrend": {
+        "trades": 76,
+        "wins": 47,
+        "losses": 14,
+        "timeouts": 15,
+        "total_r": 10.2599921537164,
+        "conf_sum": 6185.0,
+        "win_rate": 77.0,
+        "avg_r": 0.13,
+        "avg_conf": 81.0,
+        "secs": 90.0
+      },
+      "multi_confluence": {
+        "trades": 439,
+        "wins": 222,
+        "losses": 206,
+        "timeouts": 11,
+        "total_r": 36.99999950969732,
+        "conf_sum": 29780.0,
+        "win_rate": 51.9,
+        "avg_r": 0.08,
+        "avg_conf": 68.0,
+        "secs": 66.0
+      },
+      "vwap": {
+        "trades": 186,
+        "wins": 96,
+        "losses": 81,
+        "timeouts": 9,
+        "total_r": 6.236949502999279,
+        "conf_sum": 14540.0,
+        "win_rate": 54.2,
+        "avg_r": 0.03,
+        "avg_conf": 78.0,
+        "secs": 83.0
+      },
+      "cci_williams": {
+        "trades": 412,
+        "wins": 189,
+        "losses": 207,
+        "timeouts": 16,
+        "total_r": -4.875000349654435,
+        "conf_sum": 29347.0,
+        "win_rate": 47.7,
+        "avg_r": -0.01,
+        "avg_conf": 71.0,
+        "secs": 68.0
+      },
+      "parabolic_sar": {
+        "trades": 183,
+        "wins": 102,
+        "losses": 67,
+        "timeouts": 14,
+        "total_r": 17.20251758248895,
+        "conf_sum": 14384.0,
+        "win_rate": 60.4,
+        "avg_r": 0.09,
+        "avg_conf": 79.0,
+        "secs": 84.0
+      }
+    },
+    "4h": {
+      "breakout": {
+        "trades": 30,
+        "wins": 14,
+        "losses": 2,
+        "timeouts": 14,
+        "total_r": 3.792529948779583,
+        "conf_sum": 2513.0,
+        "win_rate": 87.5,
+        "avg_r": 0.13,
+        "avg_conf": 84.0,
+        "secs": 49.0
+      },
+      "swing": {
+        "trades": 195,
+        "wins": 78,
+        "losses": 83,
+        "timeouts": 34,
+        "total_r": 44.4766377516284,
+        "conf_sum": 15058.0,
+        "win_rate": 48.4,
+        "avg_r": 0.23,
+        "avg_conf": 77.0,
+        "secs": 37.0
+      },
+      "ichimoku": {
+        "trades": 333,
+        "wins": 125,
+        "losses": 106,
+        "timeouts": 102,
+        "total_r": 43.40660962998925,
+        "conf_sum": 27409.0,
+        "win_rate": 54.1,
+        "avg_r": 0.13,
+        "avg_conf": 82.0,
+        "secs": 27.0
+      },
+      "volume_breakout": {
+        "trades": 63,
+        "wins": 26,
+        "losses": 1,
+        "timeouts": 36,
+        "total_r": 10.981359966707947,
+        "conf_sum": 4915.0,
+        "win_rate": 96.3,
+        "avg_r": 0.17,
+        "avg_conf": 78.0,
+        "secs": 47.0
+      }
+    }
+  }
+}
