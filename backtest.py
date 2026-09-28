@@ -113,7 +113,8 @@ def run_timeframe(tf, yahoo_range, yahoo_interval):
                 res = simulate(df, i, sig, cfg["trade_type"])
                 if res:
                     stats["trades"] += 1
-                    stats[f"{res['outcome'].lower()}s" if res["outcome"] != "TIMEOUT" else "timeouts"] += 1
+                    _okey = {"WIN": "wins", "LOSS": "losses", "TIMEOUT": "timeouts"}[res["outcome"]]
+                    stats[_okey] += 1
                     stats["total_r"] += res["r"]
                     stats["conf_sum"] += sig.get("confidence", 0)
                     last_signal = i
