@@ -408,11 +408,33 @@ class CandleHunterSignalBot:
                             )
                             self._news_alert_sent = True
                             logger.info(f"📢 News alert sent: {event.get('title', '')}")
+                        # 📢 تنبيه مختصر للقناة العامة (معلومي — بياخد باله من السوق)
+                        if self.public_channel and not getattr(self, '_news_alert_public_sent', False):
+                            try:
+                                _pub_msg = (
+                                    "⚠️ <b>خبر اقتصادي قوي بعد قليل</b>\n"
+                                    f"🔴 {event.get('title', '')}\n"
+                                    "━━━━━━━━━━━━━━━━━━━━\n"
+                                    "🔄 التقلب هيتزايد بشدة على الذهب\n"
+                                    "💡 تجنب فتح صفقات جديدة لحد ما السوق يهدى\n"
+                                    "━━━━━━━━━━━━━━━━━━━━\n"
+                                    "🤖 صياد الشمعات | Candle Hunter"
+                                )
+                                await self.bot.send_message(
+                                    chat_id=self.public_channel,
+                                    text=_pub_msg,
+                                    parse_mode='HTML'
+                                )
+                                self._news_alert_public_sent = True
+                                logger.info(f"📢 Public news alert sent: {event.get('title', '')}")
+                            except Exception as pe:
+                                logger.warning(f"Public news alert failed: {pe}")
                 except Exception as e:
                     logger.warning(f"News alert failed: {e}")
                 return all_signals
             else:
                 self._news_alert_sent = False
+                self._news_alert_public_sent = False
         except Exception as e:
             logger.warning(f"Calendar check failed: {e}")
 
@@ -763,6 +785,15 @@ class CandleHunterSignalBot:
 
         sent_directions = set()
         min_conf_gate = int(os.getenv("MIN_CONFIDENCE", "85"))
+        # 🔒 DEAD-HOURS GATE: عتبة أعلى في الساعات الضعيفة (آسيوي/ميت) — إشارات كاذبة أقل
+        try:
+            _sinfo = self.active_hours_filter.get_session_info()
+            if _sinfo.get("session") in ("ASIAN", "DEAD"):
+                _dead_gate = int(os.getenv("DEAD_HOURS_MIN_CONFIDENCE", "90"))
+                min_conf_gate = max(min_conf_gate, _dead_gate)
+                logger.info(f"🔒 Dead-hours gate active ({_sinfo.get('session')}): threshold {min_conf_gate}%")
+        except Exception as _e:
+            logger.debug(f"Session check skipped: {_e}")
         for signal in filtered_signals:
             # منع تكرار نفس الاتجاه داخل نفس المسح
             sig_dir = signal.get("signal_type", "")
