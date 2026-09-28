@@ -428,6 +428,204 @@ class SMCAnalyzer:
             logger.error(f"SMC analyze_all error: {e}")
             return {"bias": "neutral", "error": str(e)}
 
+
+    # ═══════════════════════════════════════════════════════════
+    # طبقة تأكيد النشر: BOS / CHOCH / Liquidity Sweep / قوة الشموع
+    # ═══════════════════════════════════════════════════════════
+
+    def detect_swings(self, df: pd.DataFrame, window: int = 2) -> Dict:
+        """قمم وقيعان السوينج (fractal pivots)"""
+        highs, lows = [], []
+        h, l = df["high"].values, df["low"].values
+        for i in range(window, len(df) - window):
+            if h[i] == max(h[i - window:i + window + 1]):
+                highs.append({"idx": i, "price": float(h[i])})
+            if l[i] == min(l[i - window:i + window + 1]):
+                lows.append({"idx": i, "price": float(l[i])})
+        return {"highs": highs, "lows": lows}
+
+    def detect_bos_choch(self, df: pd.DataFrame, window: int = 2) -> Dict:
+        """BOS (استمرار) و CHOCH (انعكاس) من كسر آخر قمة/قاع سوينج"""
+        try:
+            swings = self.detect_swings(df, window)
+            closes = df["close"].values
+            if not swings["highs"] or not swings["lows"]:
+                return {"type": "NONE", "direction": "neutral"}
+
+            # آخر حدث كسر: قمة سوينج سابقة اتقفلت فوقها (BOS/CHOCH صاعد)
+            # أو قاع سوينج سابق اتقفلت تحته (نازل)
+            events = []  # (idx, kind, direction)
+            hh = swings["highs"]
+            ll = swings["lows"]
+            for s in hh:
+                for j in range(s["idx"] + 1, len(closes)):
+                    if closes[j] > s["price"]:
+                        events.append((j, "HIGH_BREAK", "bullish", s["price"]))
+                        break
+            for s in ll:
+                for j in range(s["idx"] + 1, len(closes)):
+                    if closes[j] < s["price"]:
+                        events.append((j, "LOW_BREAK", "bearish", s["price"]))
+                        break
+            if not events:
+                return {"type": "NONE", "direction": "neutral"}
+            events.sort(key=lambda e: e[0])
+            last_idx, last_kind, last_dir, last_level = events[-1]
+
+            # نحدد اتجاه الترند قبل الحدث من الحدث اللي قبله
+            if len(events) >= 2:
+                prev_dir = events[-2][2]
+                event_type = "BOS" if prev_dir == last_dir else "CHOCH"
+            else:
+                event_type = "BOS"
+            return {
+                "type": event_type, "direction": last_dir,
+                "level": last_level, "bars_ago": len(closes) - 1 - last_idx,
+            }
+        except Exception as e:
+            logger.warning(f"detect_bos_choch error: {e}")
+            return {"type": "NONE", "direction": "neutral"}
+
+    def detect_liquidity_sweep(self, df: pd.DataFrame, lookback: int = 20, window: int = 2) -> Dict:
+        """كنس السيولة: ذيل يخترق قمة/قاع سابقة والإغلاق يرجع جوه"""
+        try:
+            seg = df.tail(lookback).reset_index(drop=True)
+            if len(seg) < window * 2 + 3:
+                return {"swept": False, "direction": "neutral"}
+            highs = seg["high"].values
+            lows = seg["low"].values
+            closes = seg["close"].values
+            # آخر سوينج قبل آخر 3 شموع
+            sw_high, sw_low = None, None
+            for i in range(len(seg) - 4 - window, window, -1):
+                if sw_high is None and highs[i] == max(highs[i - window:i + window + 1]):
+                    sw_high = highs[i]
+                if sw_low is None and lows[i] == min(lows[i - window:i + window + 1]):
+                    sw_low = lows[i]
+                if sw_high and sw_low:
+                    break
+            last = len(seg) - 1
+            if sw_high and highs[last] > sw_high and closes[last] < sw_high:
+                return {"swept": True, "direction": "bearish", "level": float(sw_high)}
+            if sw_low and lows[last] < sw_low and closes[last] > sw_low:
+                return {"swept": True, "direction": "bullish", "level": float(sw_low)}
+            return {"swept": False, "direction": "neutral"}
+        except Exception as e:
+            logger.warning(f"detect_liquidity_sweep error: {e}")
+            return {"swept": False, "direction": "neutral"}
+
+    def candle_strength(self, df: pd.DataFrame, n: int = 3) -> float:
+        """قوة الشموع: متوسط نسبة الجسم للمدى في آخر n شموع (0-1)"""
+        try:
+            seg = df.tail(n)
+            strengths = []
+            for _, row in seg.iterrows():
+                rng = float(row["high"] - row["low"])
+                if rng <= 0:
+                    continue
+                strengths.append(abs(float(row["close"] - row["open"])) / rng)
+            return round(sum(strengths) / len(strengths), 2) if strengths else 0.0
+        except Exception as e:
+            logger.warning(f"candle_strength error: {e}")
+            return 0.0
+
+    def price_action_confluence(self, df: pd.DataFrame, signal_type: str) -> Dict:
+        """طبقة تأكيد SMC/Price Action — 6 عوامل:
+        1) BOS في اتجاه الإشارة  2) CHOCH انعكاس مؤكد  3) Order Block في الاتجاه
+        4) FVG غير معوض قريب  5) Liquidity Sweep عكس الاتجاه  6) قوة شموع ≥ 50%
+        """
+        is_buy = signal_type.upper() in ("BUY", "LONG", "BULLISH")
+        details = {}
+        score = 0
+
+        # 1) BOS / 2) CHOCH
+        structure = self.detect_bos_choch(df)
+        details["structure"] = structure
+        if structure["type"] == "BOS" and (
+            (is_buy and structure["direction"] == "bullish") or
+            (not is_buy and structure["direction"] == "bearish")
+        ):
+            score += 1
+            details["bos_aligned"] = True
+        if structure["type"] == "CHOCH" and (
+            (is_buy and structure["direction"] == "bullish") or
+            (not is_buy and structure["direction"] == "bearish")
+        ):
+            score += 1
+            details["choch_aligned"] = True
+
+        # 3) Order Block في الاتجاه
+        try:
+            obs = self.find_order_blocks(df)
+            price = float(df["close"].iloc[-1])
+            for ob in obs:
+                ob_top = ob.get("top", ob.get("high", 0)) or ob.get("zone", [0, 0])[1]
+                ob_bot = ob.get("bottom", ob.get("low", 0)) or ob.get("zone", [0, 0])[0]
+                ob_type = ob.get("type", "").lower()
+                in_zone = ob_bot <= price <= ob_top
+                if is_buy and "bull" in ob_type and (in_zone or 0 <= price - ob_top < 3.0):
+                    # سعر جوه البلوك الصاعد (ريتست) أو خرج منه لفوق للتو
+                    score += 1
+                    details["order_block"] = ob_type
+                    break
+                if (not is_buy) and "bear" in ob_type and (in_zone or 0 <= ob_bot - price < 3.0):
+                    score += 1
+                    details["order_block"] = ob_type
+                    break
+        except Exception as e:
+            logger.debug(f"OB gate error: {e}")
+
+        # 4) FVG غير معوض في الاتجاه
+        try:
+            fvgs = self.find_fvg(df)
+            for f in fvgs:
+                f_dir = f.get("type", f.get("direction", "")).lower()
+                filled = f.get("filled", False)
+                if not filled and (
+                    (is_buy and "bull" in f_dir) or ((not is_buy) and "bear" in f_dir)
+                ):
+                    score += 1
+                    details["fvg"] = f_dir
+                    break
+        except Exception as e:
+            logger.debug(f"FVG gate error: {e}")
+
+        # 5) Liquidity Sweep عكس الاتجاه (كنس السيولة ثم انعكاس)
+        sweep = self.detect_liquidity_sweep(df)
+        details["sweep"] = {"swept": sweep["swept"], "direction": sweep["direction"]}
+        if sweep["swept"] and (
+            (is_buy and sweep["direction"] == "bullish") or
+            ((not is_buy) and sweep["direction"] == "bearish")
+        ):
+            score += 1
+            details["liquidity_sweep"] = True
+
+        # 6) قوة الشموع
+        strength = self.candle_strength(df)
+        details["candle_strength"] = strength
+        if strength >= 0.5:
+            score += 1
+
+        return {
+            "score": score, "max": 6, "direction": "buy" if is_buy else "sell",
+            "details": details, "signal_type": signal_type,
+        }
+
+    def directional_gate(self, df: pd.DataFrame, signal_type: str, min_score: int = 3) -> Dict:
+        """بوابة النشر: score >= min_score من 6 عوامل — والفشل مش بيمنع لو مفيش داتا"""
+        try:
+            if df is None or len(df) < 30:
+                return {"passed": True, "score": -1, "reason": "insufficient_data", "details": {}}
+            pa = self.price_action_confluence(df, signal_type)
+            passed = pa["score"] >= min_score
+            return {
+                "passed": passed, "score": pa["score"], "max": pa["max"],
+                "factors": pa["details"], "reason": None if passed else "low_confluence",
+            }
+        except Exception as e:
+            logger.warning(f"directional_gate error: {e}")
+            return {"passed": True, "score": -1, "reason": "gate_error", "details": {}}
+
     def get_smc_confidence_adjustment(self, smc_data: Dict, signal_type: str) -> float:
         try:
             adjustment = 0.0

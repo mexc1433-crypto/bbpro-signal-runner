@@ -542,7 +542,7 @@ class CandleHunterSignalBot:
                 continue
         return False
 
-    def _log_rejected_signal(self, signal: Dict, threshold: int):
+    def _log_rejected_signal(self, signal: Dict, threshold: int, reason: str = None):
         """تسجيل الإشارات المرفوضة داخلياً للتحليل — لا تُنشر ولا تدخل إحصائيات الأداء"""
         try:
             import json as _json
@@ -562,7 +562,7 @@ class CandleHunterSignalBot:
                 "take_profit_1": signal.get("take_profit_1", 0),
                 "strategy_name": signal.get("strategy_name", "Unknown"),
                 "confidence": signal.get("confidence", 0),
-                "rejected_reason": f"confidence < MIN_CONFIDENCE ({threshold}%)",
+                "rejected_reason": reason or f"confidence < MIN_CONFIDENCE ({threshold}%)",
                 "created_at": datetime.now().isoformat(),
             })
             # الاحتفاظ بآخر 500 إشارة مرفوضة فقط
@@ -775,6 +775,23 @@ class CandleHunterSignalBot:
                 logger.info(f"🛡️ Quality gate: {signal.get('strategy_name')} {sig_dir} conf={signal.get('confidence', 0):.0f}% < {min_conf_gate}% — not published (logged for analysis)")
                 self._log_rejected_signal(signal, min_conf_gate)
                 continue
+
+            # 🧠 SMC/PRICE-ACTION GATE: تأكيد الهيكل قبل النشر (BOS/CHOCH/OB/FVG/Sweep/قوة الشموع)
+            if os.getenv("SMC_GATE", "1") == "1":
+                try:
+                    df_smc = self.fetcher.fetch_ohlcv("15m", limit=120)
+                    smc_min = int(os.getenv("SMC_MIN_CONFLUENCE", "3"))
+                    gate = self.smc.directional_gate(df_smc, sig_dir, smc_min)
+                    if not gate["passed"]:
+                        logger.info(f"🧠 SMC gate: {signal.get('strategy_name')} {sig_dir} confluence {gate['score']}/{gate.get('max', 6)} < {smc_min} — not published")
+                        self._log_rejected_signal(
+                            signal, min_conf_gate,
+                            reason=f"SMC confluence {gate['score']}/{gate.get('max', 6)} < {smc_min} ({gate.get('reason', '')})"
+                        )
+                        continue
+                    logger.info(f"🧠 SMC gate passed: {sig_dir} confluence {gate['score']}/{gate.get('max', 6)}")
+                except Exception as e:
+                    logger.warning(f"SMC gate check failed (fail-open): {e}")
 
             # 📐 DYNAMIC SL/TP (ATR-based): تعديل SL/TP حسب التقلب الحالي
             try:
