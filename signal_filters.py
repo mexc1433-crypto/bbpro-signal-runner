@@ -2,6 +2,7 @@
 صياد الشمعات | Candle Hunter - Advanced Signal Filters
 فلتر السيولة والتذبذب + فلتر الساعات النشطة
 """
+import os
 import logging
 from datetime import datetime
 from typing import Dict, Optional
@@ -15,9 +16,11 @@ class VolatilityFilter:
     """فلتر السيولة والتذبذب — يمنع الإشارات في ظروف غير مثالية"""
 
     def __init__(self):
-        # ATR كنسبة من السعر — النطاق المثالي
-        self.atr_min_pct = 0.06   # أقل من كده = لا حركة =skip (lowered for low-vol sessions)
-        self.atr_max_pct = 1.5    # أعلى من كده = تذبذب خطير =skip
+        # ATR كنسبة من السعر — النطاق المثالي (قابل للتعديل من البيئة)
+        self.atr_min_pct = float(os.getenv("VOL_MIN_ATR_PCT", "0.06"))  # أقل = لا حركة = skip
+        # كان 1.5 — اترفع لـ2.5: SL/TP بقوا متكيفين مع ATR فالتذبذب العالي
+        # بيتعامل معاه بأهداف أوسع مش ببلوك كامل للمسح (كان بيسكت أيام الحركة القوية)
+        self.atr_max_pct = float(os.getenv("VOL_MAX_ATR_PCT", "2.5"))
 
     def check(self, df: pd.DataFrame, price: float) -> Dict:
         """يفحص السيولة والتذبذب. Returns: {ok: bool, reason: str, atr_pct: float}"""
