@@ -488,7 +488,11 @@ class CandleHunterSignalBot:
                             _blacklist += [x for x in json.load(open(_ab_path)) if x and x not in _blacklist]
                     except Exception:
                         pass
-                    for strat_name in strategy_names:
+                    # 🔒 حصرية VIP: على فريم 4 ساعات نشغّل نجوم الباك تيست كمان
+                    tf_strategies = list(strategy_names)
+                    if trade_type == "MEDIUM" and timeframe == "4h":
+                        tf_strategies += ["volume_breakout", "breakout"]
+                    for strat_name in tf_strategies:
                         if strat_name not in self.strategies:
                             continue
                         if strat_name in _blacklist:
@@ -503,6 +507,10 @@ class CandleHunterSignalBot:
                                 signal["strategy_name"] = strat_name
                                 signal["timeframe"] = timeframe
                                 signal["trade_type"] = trade_t
+                                # 🔒 فريم 4 ساعات = محتوى VIP حصري (الباك تيست: أعلى نسب نجاح)
+                                if trade_type == "MEDIUM" and timeframe == "4h":
+                                    signal["trade_type"] = "SWING"
+                                    signal["vip_exclusive"] = True
                                 signal["timestamp"] = datetime.now().strftime('%Y-%m-%d %H:%M')
 
                                 # ⏰ FEATURE 5: Active Hours Filter

@@ -81,6 +81,10 @@ def format_signal_message(signal: Dict, capital_plans: List[Dict],
     msg += f"🎯 TP3: {_fmt_price(signal['take_profit_3'])} ({_fmt_pct(entry, signal['take_profit_3'])}) — 20%\n"
     msg += f"🛑 SL: {_fmt_price(signal['stop_loss'])} ({_fmt_pct(entry, signal['stop_loss'])})\n\n"
 
+    # VIP exclusive badge — إشارات 4 ساعات الحصرية
+    if signal.get("vip_exclusive"):
+        msg += f"🔒 حصرية VIP — إعداد 4 ساعات\n"
+
     # Multi-confirmation badge
     if signal.get("multi_confirmed"):
         msg += f"✅ تأكيد متعدد: {signal.get('confirming_strategies', 0)} استراتيجية\n"
