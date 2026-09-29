@@ -1,0 +1,176 @@
+{
+  "23": {
+    "trades": 99,
+    "wins": 50,
+    "losses": 47,
+    "timeouts": 2,
+    "total_r": 6.379930370352655
+  },
+  "7": {
+    "trades": 101,
+    "wins": 53,
+    "losses": 43,
+    "timeouts": 5,
+    "total_r": 10.189178097596624
+  },
+  "2": {
+    "trades": 116,
+    "wins": 59,
+    "losses": 51,
+    "timeouts": 6,
+    "total_r": 13.483927918749618
+  },
+  "10": {
+    "trades": 80,
+    "wins": 42,
+    "losses": 35,
+    "timeouts": 3,
+    "total_r": 8.736879837047516
+  },
+  "16": {
+    "trades": 102,
+    "wins": 54,
+    "losses": 44,
+    "timeouts": 4,
+    "total_r": 8.370170241450921
+  },
+  "12": {
+    "trades": 104,
+    "wins": 53,
+    "losses": 44,
+    "timeouts": 7,
+    "total_r": 9.808115267226825
+  },
+  "13": {
+    "trades": 144,
+    "wins": 74,
+    "losses": 59,
+    "timeouts": 11,
+    "total_r": 21.148803131088794
+  },
+  "6": {
+    "trades": 108,
+    "wins": 51,
+    "losses": 49,
+    "timeouts": 8,
+    "total_r": 7.260893055885479
+  },
+  "19": {
+    "trades": 111,
+    "wins": 57,
+    "losses": 52,
+    "timeouts": 2,
+    "total_r": 8.917337348899343
+  },
+  "1": {
+    "trades": 122,
+    "wins": 65,
+    "losses": 50,
+    "timeouts": 7,
+    "total_r": 15.162802994919389
+  },
+  "18": {
+    "trades": 72,
+    "wins": 32,
+    "losses": 37,
+    "timeouts": 3,
+    "total_r": -6.191299266272384
+  },
+  "20": {
+    "trades": 104,
+    "wins": 58,
+    "losses": 44,
+    "timeouts": 2,
+    "total_r": 20.23472917559251
+  },
+  "3": {
+    "trades": 95,
+    "wins": 40,
+    "losses": 51,
+    "timeouts": 4,
+    "total_r": -8.449424011669597
+  },
+  "15": {
+    "trades": 131,
+    "wins": 63,
+    "losses": 64,
+    "timeouts": 4,
+    "total_r": 0.4105694622931051
+  },
+  "5": {
+    "trades": 99,
+    "wins": 50,
+    "losses": 43,
+    "timeouts": 6,
+    "total_r": 11.70616105841107
+  },
+  "21": {
+    "trades": 26,
+    "wins": 10,
+    "losses": 16,
+    "timeouts": 0,
+    "total_r": -0.8463443592791626
+  },
+  "0": {
+    "trades": 87,
+    "wins": 40,
+    "losses": 45,
+    "timeouts": 2,
+    "total_r": -7.343400741511961
+  },
+  "14": {
+    "trades": 166,
+    "wins": 90,
+    "losses": 71,
+    "timeouts": 5,
+    "total_r": 19.47186806211122
+  },
+  "4": {
+    "trades": 70,
+    "wins": 37,
+    "losses": 29,
+    "timeouts": 4,
+    "total_r": 10.863513082765719
+  },
+  "17": {
+    "trades": 100,
+    "wins": 42,
+    "losses": 54,
+    "timeouts": 4,
+    "total_r": -10.512174911090176
+  },
+  "11": {
+    "trades": 99,
+    "wins": 58,
+    "losses": 34,
+    "timeouts": 7,
+    "total_r": 29.565098465788807
+  },
+  "9": {
+    "trades": 101,
+    "wins": 42,
+    "losses": 55,
+    "timeouts": 4,
+    "total_r": -8.875001382260553
+  },
+  "22": {
+    "trades": 52,
+    "wins": 26,
+    "losses": 24,
+    "timeouts": 2,
+    "total_r": 1.9798924751993714
+  },
+  "8": {
+    "trades": 109,
+    "wins": 59,
+    "losses": 48,
+    "timeouts": 2,
+    "total_r": 12.39001024483717
+  },
+  "weak_hours": [
+    3,
+    9,
+    17,
+    21
+  ]
+}
