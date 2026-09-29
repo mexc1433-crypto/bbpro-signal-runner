@@ -145,6 +145,26 @@ class WeeklyReporter:
         except Exception:
             pass
 
+        # 🔍 قمع الفلاتر — وين بتضيع الإشارات
+        try:
+            f = self._get_rejection_funnel(7)
+            if any(v > 0 for k, v in f.items() if k != "smc_near_miss"):
+                msg += "\n🔍 قمع الفلاتر (7 أيام) — وين ضاعت الإشارات:\n"
+                if f.get("multi_confirm"):
+                    msg += f"  • التأكيد المتعدد: {f['multi_confirm']}\n"
+                if f.get("smc"):
+                    near = f.get("smc_near_miss", 0)
+                    extra = f" (منها {near} كانت 2/6 قريبة)" if near else ""
+                    msg += f"  • بوابة SMC: {f['smc']}{extra}\n"
+                if f.get("confidence"):
+                    msg += f"  • بوابة الثقة: {f['confidence']}\n"
+                if f.get("candle"):
+                    msg += f"  • شمعة التأكيد: {f['candle']}\n"
+                if f.get("bad_hour"):
+                    msg += f"  • الساعات الوحشة: {f['bad_hour']}\n"
+        except Exception:
+            pass
+
         msg += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         msg += "⚠️ ليست نصيحة استثمارية\n"
         msg += "🤖 صياد الشمعات | Candle Hunter"
@@ -165,6 +185,40 @@ class WeeklyReporter:
             prot = f" | 🔒{d['protected']}" if d.get("protected") else ""
             msg += f"  • {name}: {d['trades']} صفقة | نجاح {wr}{prot}{flag}\n"
         return msg
+
+    def _get_rejection_funnel(self, days: int = 7) -> Dict:
+        """قمع الفلاتر: عدد المرفوض عند كل بوابة آخر N يوم — عشان نعرف البوابات الصارمة زيادة"""
+        import os, json
+        try:
+            path = os.path.join(
+                os.getenv("STATE_DIR", os.path.dirname(os.path.abspath(__file__))),
+                "rejected_signals.json")
+            entries = json.load(open(path, "r", encoding="utf-8"))
+        except Exception:
+            return {}
+        cutoff = datetime.now() - timedelta(days=days)
+        funnel = {"multi_confirm": 0, "smc": 0, "smc_near_miss": 0,
+                  "confidence": 0, "candle": 0, "bad_hour": 0}
+        for e in entries:
+            try:
+                if datetime.fromisoformat(e.get("created_at", "")) < cutoff:
+                    continue
+            except Exception:
+                continue
+            r = e.get("rejected_reason") or ""
+            if r.startswith("single_strategy") or r.startswith("multi_weak"):
+                funnel["multi_confirm"] += 1
+            elif "SMC confluence" in r:
+                funnel["smc"] += 1
+                if "2/6" in r:
+                    funnel["smc_near_miss"] += 1
+            elif "candle" in r.lower() or "confirm" in r.lower():
+                funnel["candle"] += 1
+            elif r.startswith("bad_hour"):
+                funnel["bad_hour"] += 1
+            else:
+                funnel["confidence"] += 1
+        return funnel
 
     def should_run_now(self) -> bool:
         """هل الوقت مناسب لإرسال التقرير؟ (جمعة 8م)"""
