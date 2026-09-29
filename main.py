@@ -290,6 +290,15 @@ class CandleHunterSignalBot:
                     logger.debug(f"15m candles for tracker failed: {e}")
                 updated = self.tracker.check_pending_signals(ticker["last"], candles_15m)
                 for s in updated:
+                    # 🔒 حدث تأمين TP1 — تنبيه فوري لإدارة الصفقة (الصفقة لسه شغالة)
+                    if s.get("_event") == "TP1_SECURED":
+                        s.pop("_event", None)
+                        logger.info(f"📋 Signal {s['id']} → TP1 SECURED (still running)")
+                        try:
+                            await self._send_tp1_alert(s)
+                        except Exception as e:
+                            logger.warning(f"Failed to send TP1 alert: {e}")
+                        continue
                     logger.info(f"📋 Signal {s['id']} → {s['result']} (exit={s['exit_price']})")
                     # إرسال رسالة إغلاق الصفقة للقناة الخاصة
                     try:
@@ -472,6 +481,13 @@ class CandleHunterSignalBot:
                         continue
 
                     _blacklist = [s.strip() for s in os.getenv("STRATEGY_BLACKLIST", "").split(",") if s.strip()]
+                    # 🤖 بلاك ليست تلقائية — من تقرير الأسبوع (أداء < 45% على 30 يوم)
+                    try:
+                        _ab_path = os.path.join(os.getenv("STATE_DIR", "/app/data"), "auto_blacklist.json")
+                        if os.path.exists(_ab_path):
+                            _blacklist += [x for x in json.load(open(_ab_path)) if x and x not in _blacklist]
+                    except Exception:
+                        pass
                     for strat_name in strategy_names:
                         if strat_name not in self.strategies:
                             continue
@@ -826,6 +842,14 @@ class CandleHunterSignalBot:
 
         logger.info(f"📊 {len(confirmed_signals)} confirmed → {len(filtered_signals)} after filtering")
 
+        # ⏰ ساعات وحشة: من باك تيست — نمنع النشر في أوقات تاريخياً ضعيفة
+        _bad_hours = set()
+        try:
+            _bh = os.getenv("BAD_HOURS", "")
+            _bad_hours = {int(h.strip()) for h in _bh.split(",") if h.strip().isdigit()}
+        except Exception:
+            pass
+
         sent_directions = set()
         # 📐 بيانات 1h لمنطقة Premium/Discount (مرة واحدة للمسح كله)
         try:
@@ -855,6 +879,12 @@ class CandleHunterSignalBot:
                     self.smc.apply_premium_discount(signal, _df_pd)
             except Exception as _pe:
                 logger.debug(f"Premium/Discount skipped: {_pe}")
+
+            # ⏰ بوابة الساعات الوحشة — التاريخ بيقول الساعة دي ضعيفة
+            if _bad_hours and datetime.now().hour in _bad_hours:
+                logger.info(f"⏰ Bad hour {datetime.now().hour}:00 — {signal.get('strategy_name', '?')} muted")
+                self._log_rejected_signal(signal, min_conf_gate, reason=f"bad_hour_{datetime.now().hour}")
+                continue
 
             # 🛡️ QUALITY FILTER: عتبة ثقة النشر — الإشارات الأضعف تُسجل داخلياً فقط
             if signal.get("confidence", 0) < min_conf_gate:
@@ -1070,24 +1100,55 @@ class CandleHunterSignalBot:
         except Exception as e:
             logger.error(f"Error sending message: {e}")
 
+    async def _send_tp1_alert(self, signal: Dict):
+        """🔒 تنبيه فوري عند ضرب TP1 — إدارة مخاطر حسب اتفاق المالك"""
+        direction = "شراء" if signal.get("signal_type") == "BUY" else "بيع"
+        entry = signal.get("entry_price", 0)
+        tp1 = signal.get("tp1_price", signal.get("take_profit_1", 0))
+        tp2 = signal.get("take_profit_2", 0)
+        tp3 = signal.get("take_profit_3", 0)
+
+        msg = "🔒 الهدف الأول ضمنت! | XAU/USD\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += f"📊 {direction} @ {entry:,.2f} → TP1 ${tp1:,.2f} ✅\n\n"
+        msg += "🛡️ خطوات إدارة الصفقة:\n"
+        msg += "• أغلق نص الحجم الآن — الربع الأول في الجيب\n"
+        msg += f"• حرّك الستوب لنقطة الدخول ${entry:,.2f} — الصفقة بقت بلا خسارة\n"
+        targets = f"TP2 ${tp2:,.2f}" if tp2 else ""
+        if tp3:
+            targets += f" | TP3 ${tp3:,.2f}"
+        if targets:
+            msg += f"• سيب النص التاني يجري لـ {targets}\n"
+        msg += "\n🤖 صياد الشمعات | Candle Hunter"
+
+        if self.private_channel:
+            try:
+                await self.bot.send_message(chat_id=self.private_channel, text=msg)
+            except Exception as e:
+                logger.warning(f"TP1 alert send failed: {e}")
+
     async def _send_close_notification(self, signal: Dict):
         """رسالة إغلاق الصفقة لما TP أو SL يوصل"""
         is_win = signal.get("result") == "WIN"
-        is_partial_tp1 = signal.get("close_type") == "PARTIAL_TP1"
-        emoji = "✅" if is_win else "❌"
-        result_text = "ضرب الهدف 🎯" if is_win else "ضرب الستوب 🛑"
+        is_protected = signal.get("result") == "PROTECTED"
+        emoji = "✅" if is_win else ("🔒" if is_protected else "❌")
+        result_text = ("ضرب الهدف 🎯" if is_win
+                       else ("صفقة مؤمنة — نص على TP1 والباقي على الدخول" if is_protected
+                             else "ضرب الستوب 🛑"))
         direction = "شراء" if signal.get("signal_type") == "BUY" else "بيع"
 
         entry = signal.get("entry_price", 0)
         exit_price = signal.get("exit_price", 0)
-        pnl_pct = ((exit_price - entry) / entry * 100) if is_win else ((exit_price - entry) / entry * 100)
-        if signal.get("signal_type") == "SELL" and not is_win:
-            pnl_pct = abs(pnl_pct)
+        pnl_pct = ((exit_price - entry) / entry * 100)
+        if signal.get("signal_type") == "SELL":
+            pnl_pct = ((entry - exit_price) / entry * 100)
         sign = "+" if pnl_pct > 0 else ""
 
         msg = f"{emoji} إغلاق صفقة | XAU/USD\n"
         msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         msg += f"📊 {direction} → {result_text}\n"
+        if is_protected:
+            msg += f"💵 TP1 المحقق: ${signal.get('tp1_price', 0):,.2f} (نص الحجم)\n"
         msg += f"💵 الدخول: {entry:,.2f}\n"
         msg += f"🏁 الخروج: {exit_price:,.2f}\n"
         msg += f"📈 النتيجة: {sign}{pnl_pct:.2f}%\n\n"

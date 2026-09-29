@@ -145,7 +145,11 @@ class SignalTracker:
                 ttl = self.PENDING_TTL_HOURS.get(trade_type, self.DEFAULT_TTL_HOURS)
                 if age_hours >= ttl:
                     sig["status"] = "CLOSED"
-                    sig["result"] = "EXPIRED"
+                    if sig.get("tp1_hit"):
+                        sig["result"] = "PROTECTED"
+                        sig["close_type"] = "SECURED_TTL"
+                    else:
+                        sig["result"] = "EXPIRED"
                     sig["exit_price"] = current_price
                     sig["exit_time"] = now.strftime('%Y-%m-%d %H:%M')
                     sig["close_type"] = "TTL_EXPIRED"
@@ -179,20 +183,43 @@ class SignalTracker:
             hit_tp2 = tp2 > 0 and (period_high >= tp2 if is_buy else period_low <= tp2)
             hit_sl = period_low <= sl if is_buy else period_high >= sl
 
-            # ===== FEATURE 3: Partial TP =====
-            # TP1 → أغلق 50% من الصفقة (WIN_PARTIAL)
+            # ===== 🛡️ TP1 = تأمين الصفقة مش إغلاقها =====
+            # اتفاق المالك: ضرب TP1 → أغلق نص الحجم + حرّك الستوب للدخول
+            # الصفقة تفضل متتبعة: TP2 = WIN كامل، الستوب بعد التأمين = PROTECTED (بريك إيفن)
             if hit_tp1 and not sig.get("tp1_hit", False):
                 sig["tp1_hit"] = True
                 sig["tp1_price"] = tp1
-                sig["exit_price"] = tp1
+                sig["secured"] = True
+                # حرّك الستوب لنقطة الدخول — الباقي بلا خسارة
+                sig["stop_loss"] = entry
+                sig["trailing_stop"] = entry
+                sig["_event"] = "TP1_SECURED"
+                updated.append(sig)
+                logger.info(f"🔒 TP1 SECURED: {sig['id']} {sig['strategy_name']} — SL moved to entry {entry}")
+
+            # TP2 بعد التأمين → WIN كامل
+            elif sig.get("tp1_hit") and hit_tp2:
+                sig["tp2_hit"] = True
+                sig["tp2_price"] = tp2
+                sig["exit_price"] = tp2
                 sig["exit_time"] = now_str
                 sig["result"] = "WIN"
                 sig["status"] = "CLOSED"
-                sig["close_type"] = "PARTIAL_TP1"
+                sig["close_type"] = "FULL_TP2"
                 updated.append(sig)
-                logger.info(f"✅ WIN (TP1): {sig['id']} {sig['strategy_name']} exited at {current_price}")
+                logger.info(f"✅ WIN (TP2 after secure): {sig['id']} {sig['strategy_name']} exited at {tp2}")
 
-            # TP2 → أغلق الصفقة بالكامل (WIN_FULL)
+            # الستوب بعد التأمين → PROTECTED: النص الأول ربح، والباقي على الدخول
+            elif sig.get("tp1_hit") and hit_sl:
+                sig["status"] = "CLOSED"
+                sig["result"] = "PROTECTED"
+                sig["exit_price"] = entry
+                sig["exit_time"] = now_str
+                sig["close_type"] = "BREAKEVEN"
+                updated.append(sig)
+                logger.info(f"🔒 PROTECTED (breakeven): {sig['id']} {sig['strategy_name']} — half won at TP1, rest at entry")
+
+            # TP2 مباشرة (قفزة سريعة فوق TP1) → WIN كامل
             elif hit_tp2 and not sig.get("tp2_hit", False) and not sig.get("tp1_hit", False):
                 sig["tp2_hit"] = True
                 sig["tp2_price"] = tp2
@@ -204,43 +231,7 @@ class SignalTracker:
                 updated.append(sig)
                 logger.info(f"✅ WIN (TP2): {sig['id']} {sig['strategy_name']} exited at {current_price}")
 
-            # ===== FEATURE 4: Trailing Stop بعد TP1 =====
-            # لو TP1 ضرب بس لسه في PENDING partial → حرك الستوب لBreak-even
-            elif sig.get("tp1_hit", False) and sig.get("status") == "PENDING":
-                if not sig.get("trailing_activated", False):
-                    # أول مرة بعد TP1 → حرك لBreak-even
-                    sig["stop_loss"] = entry  # Break-even
-                    sig["trailing_activated"] = True
-                    sig["trailing_stop"] = entry
-                    logger.info(f"📐 Trailing: {sig['id']} moved SL to break-even ({entry})")
-
-                else:
-                    # Trailing — ارفع الستوب مع كل حركة لصالحنا
-                    current_trail = sig.get("trailing_stop", entry)
-                    if is_buy:
-                        new_trail = max(current_trail, current_price * 0.998)  # 0.2% trail
-                        if new_trail > current_trail:
-                            sig["trailing_stop"] = new_trail
-                            sig["stop_loss"] = new_trail
-                    else:
-                        new_trail = min(current_trail, current_price * 1.002)
-                        if new_trail < current_trail:
-                            sig["trailing_stop"] = new_trail
-                            sig["stop_loss"] = new_trail
-
-                    # لو التريلينج ضرب → أغلق
-                    trailing_hit = current_price <= sig.get("trailing_stop", entry) if is_buy \
-                        else current_price >= sig.get("trailing_stop", entry)
-                    if trailing_hit:
-                        sig["exit_price"] = current_price
-                        sig["exit_time"] = now_str
-                        sig["result"] = "WIN"
-                        sig["status"] = "CLOSED"
-                        sig["close_type"] = "TRAILING_STOP"
-                        updated.append(sig)
-                        logger.info(f"✅ WIN (Trailing): {sig['id']} exited at {current_price}")
-
-            # ===== Stop Loss =====
+            # ===== Stop Loss قبل أي تأمين → LOSS =====
             elif hit_sl:
                 sig["status"] = "CLOSED"
                 sig["result"] = "LOSS"
@@ -271,21 +262,28 @@ class SignalTracker:
         closed = [s for s in recent if s["status"] == "CLOSED"]
         wins = [s for s in closed if s["result"] == "WIN"]
         losses = [s for s in closed if s["result"] == "LOSS"]
+        protected = [s for s in closed if s["result"] == "PROTECTED"]
+        expired = [s for s in closed if s["result"] == "EXPIRED"]
         pending = [s for s in recent if s["status"] == "PENDING"]
+        secured_open = [s for s in pending if s.get("tp1_hit")]
 
-        win_rate = (len(wins) / len(closed) * 100) if closed else 0
+        # نسبة النجاح على الصفقات المحسومة (الإشارات المؤمنة بريك إيفن ما تدخلش)
+        decided = len(wins) + len(losses)
+        win_rate = (len(wins) / decided * 100) if decided else 0
 
         # Stats per strategy
         strategy_stats = {}
         for s in closed:
             name = s["strategy_name"]
             if name not in strategy_stats:
-                strategy_stats[name] = {"wins": 0, "losses": 0, "total": 0}
+                strategy_stats[name] = {"wins": 0, "losses": 0, "protected": 0, "total": 0}
             strategy_stats[name]["total"] += 1
             if s["result"] == "WIN":
                 strategy_stats[name]["wins"] += 1
-            else:
+            elif s["result"] == "LOSS":
                 strategy_stats[name]["losses"] += 1
+            elif s["result"] == "PROTECTED":
+                strategy_stats[name]["protected"] += 1
 
         # Best and worst strategy
         best_strategy = None
@@ -307,7 +305,10 @@ class SignalTracker:
             "closed": len(closed),
             "wins": len(wins),
             "losses": len(losses),
+            "protected": len(protected),
+            "expired": len(expired),
             "pending": len(pending),
+            "secured_open": len(secured_open),
             "win_rate": win_rate,
             "strategy_stats": strategy_stats,
             "best_strategy": best_strategy,
@@ -315,6 +316,39 @@ class SignalTracker:
             "worst_strategy": worst_strategy,
             "worst_rate": worst_rate,
         }
+
+    def get_strategy_stats(self, days: int = 30) -> Dict:
+        """أداء كل استراتيجية على مدى معين + قائمة الضعاف (نجاح < 45% و10 صفقات محسومة)"""
+        cutoff = datetime.now() - timedelta(days=days)
+        per = {}
+        for s in self.signals:
+            if s.get("status") != "CLOSED":
+                continue
+            try:
+                if datetime.fromisoformat(s["created_at"]) < cutoff:
+                    continue
+            except Exception:
+                continue
+            name = s["strategy_name"]
+            d = per.setdefault(name, {"trades": 0, "wins": 0, "losses": 0,
+                                       "protected": 0, "timeouts": 0})
+            d["trades"] += 1
+            res = s.get("result", "")
+            if res == "WIN":
+                d["wins"] += 1
+            elif res == "LOSS":
+                d["losses"] += 1
+            elif res == "PROTECTED":
+                d["protected"] += 1
+            else:
+                d["timeouts"] += 1
+        for name, d in per.items():
+            decided = d["wins"] + d["losses"]
+            d["decided"] = decided
+            d["win_rate"] = round(d["wins"] / decided * 100, 1) if decided else None
+        weak = [n for n, d in per.items()
+                if d["decided"] >= 10 and d["win_rate"] is not None and d["win_rate"] < 45]
+        return {"strategies": per, "weak": weak}
 
     def get_performance_report(self, days: int = 7) -> str:
         """تقرير الأداء بصيغة عربية"""
@@ -542,6 +576,8 @@ class SignalTracker:
                 buckets[key]["wins"] += 1
             elif res == "LOSS":
                 buckets[key]["losses"] += 1
+            elif res == "PROTECTED":
+                buckets[key]["protected"] = buckets[key].get("protected", 0) + 1
             else:
                 buckets[key]["timeouts"] += 1
 
@@ -549,10 +585,14 @@ class SignalTracker:
         for key, b in buckets.items():
             total = b["wins"] + b["losses"] + b["timeouts"]
             decided = b["wins"] + b["losses"]
+            # PROTECTED = نص الصفقة ربح → تحسب نص ربح في النجاح الفعلي
+            eff_wins = b["wins"] + (b.get("protected", 0) * 0.5)
             out[key] = {
                 "signals": total,
-                "wins": b["wins"], "losses": b["losses"], "timeouts": b["timeouts"],
-                "win_rate": round(b["wins"] / decided * 100, 1) if decided else None,
+                "wins": b["wins"], "losses": b["losses"],
+                "protected": b.get("protected", 0),
+                "timeouts": b["timeouts"],
+                "win_rate": round(eff_wins / decided * 100, 1) if decided else None,
             }
         return out
 

@@ -3,6 +3,7 @@
 تقرير أسبوعي تلقائي كل يوم جمعة
 """
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Dict
 
@@ -36,6 +37,29 @@ class WeeklyReporter:
         try:
             stats = self.tracker.get_performance_stats(days=7)
             report = self._format_report(stats)
+
+            # 🤖 تحديث البلاك ليست التلقائية (أداء < 45% على 30 يوم و≥10 صفقات محسومة)
+            try:
+                strat = self.tracker.get_strategy_stats(days=30)
+                weak = strat.get("weak", [])
+                import json as _json
+                _dir = os.getenv("STATE_DIR", "/app/data")
+                _path = os.path.join(_dir, "auto_blacklist.json")
+                with open(_path, "w") as f:
+                    _json.dump(weak, f)
+                if weak:
+                    logger.info(f"🤖 Auto-blacklist updated: {weak}")
+            except Exception as e:
+                logger.warning(f"Auto-blacklist update failed: {e}")
+
+            # 📊 جدول أداء الاستراتيجيات — للقناة الخاصة والأدمن
+            try:
+                strat = self.tracker.get_strategy_stats(days=30)
+                table = self._format_strategy_table(strat)
+                if table:
+                    report += table
+            except Exception as e:
+                logger.debug(f"Strategy table failed: {e}")
 
             # إرسال نسخة تسويقية للقناة العامة (إثبات الأداء للمشتركين المحتملين)
             if self.bot and self.public_channel_id:
@@ -125,6 +149,21 @@ class WeeklyReporter:
         msg += "⚠️ ليست نصيحة استثمارية\n"
         msg += "🤖 صياد الشمعات | Candle Hunter"
 
+        return msg
+
+    def _format_strategy_table(self, strat: Dict) -> str:
+        """جدول أداء كل استراتيجية (30 يوم) — يتبعت مع التقرير الخاص"""
+        per = strat.get("strategies", {})
+        if not per:
+            return ""
+        weak = set(strat.get("weak", []))
+        msg = "\n📊 أداء الاستراتيجيات (30 يوم):\n"
+        rows = sorted(per.items(), key=lambda kv: -(kv[1].get("win_rate") or -1))
+        for name, d in rows:
+            wr = f"{d['win_rate']:.0f}%" if d["win_rate"] is not None else "—"
+            flag = " 🚫(اتبعدت تلقائياً)" if name in weak else ""
+            prot = f" | 🔒{d['protected']}" if d.get("protected") else ""
+            msg += f"  • {name}: {d['trades']} صفقة | نجاح {wr}{prot}{flag}\n"
         return msg
 
     def should_run_now(self) -> bool:
