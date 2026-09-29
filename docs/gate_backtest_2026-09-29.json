@@ -1,0 +1,30 @@
+{
+  "baseline": {
+    "n": 453,
+    "wins": 232,
+    "losses": 207,
+    "timeouts": 14,
+    "win_rate": 52.84738041002278,
+    "total_r": 41.65530562636012
+  },
+  "gated": {
+    "n": 148,
+    "wins": 88,
+    "losses": 59,
+    "timeouts": 1,
+    "win_rate": 59.863945578231295,
+    "total_r": 14.907131782946077
+  },
+  "funnel": {
+    "raw": 4776,
+    "multi": 1272,
+    "premium": 788,
+    "bad_hour": 92,
+    "quality": 0,
+    "smc": 489,
+    "candle": 59,
+    "rr": 196,
+    "published": 148
+  },
+  "generated_at": "2026-09-29T01:04:41.587870"
+}
