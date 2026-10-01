@@ -897,7 +897,8 @@ class CandleHunterSignalBot:
                 continue
 
             # 🛡️ QUALITY FILTER: عتبة ثقة النشر — الإشارات الأضعف تُسجل داخلياً فقط
-            if signal.get("confidence", 0) < min_conf_gate:
+            _conf_int = round(signal.get("confidence", 0))
+            if _conf_int < min_conf_gate:
                 logger.info(f"🛡️ Quality gate: {signal.get('strategy_name')} {sig_dir} conf={signal.get('confidence', 0):.0f}% < {min_conf_gate}% — not published (logged for analysis)")
                 self._log_rejected_signal(signal, min_conf_gate)
                 continue
