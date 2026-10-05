@@ -2464,6 +2464,45 @@ class CandleHunterSignalBot:
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
+                elif parsed.path == "/signals/rejected":
+                    qs = parse_qs(parsed.query)
+                    if qs.get("secret", [""])[0] != os.getenv("SIGNALS_API_SECRET", ""):
+                        self.send_response(401)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(b'{"error":"unauthorized"}')
+                        return
+                    rej_file = os.path.join(
+                        os.getenv("STATE_DIR", os.path.dirname(os.path.abspath(__file__))),
+                        "rejected_signals.json")
+                    try:
+                        with open(rej_file, "r", encoding="utf-8") as f:
+                            rejected = json.load(f)
+                    except Exception:
+                        rejected = []
+                    limit = min(int(qs.get("limit", ["100"])[0]), 500)
+                    rejected = sorted(rejected, key=lambda s: str(s.get("created_at", s.get("rejected_at", ""))), reverse=True)[:limit]
+                    from collections import Counter
+                    reasons = Counter()
+                    confs = []
+                    for r in rejected:
+                        reason = str(r.get("reason", "quality"))[:30]
+                        reasons[reason] += 1
+                        c = r.get("confidence", 0)
+                        if isinstance(c, (int, float)):
+                            confs.append(round(c))
+                    summary = {
+                        "count": len(rejected),
+                        "top_confidences": sorted(confs, reverse=True)[:10],
+                        "reasons": dict(reasons),
+                        "oldest": str(rejected[-1].get("created_at", "")) if rejected else "",
+                    }
+                    body = json.dumps({"summary": summary, "rejected": rejected}, ensure_ascii=False).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
                 else:
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
