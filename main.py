@@ -2486,7 +2486,7 @@ class CandleHunterSignalBot:
                     reasons = Counter()
                     confs = []
                     for r in rejected:
-                        reason = str(r.get("reason", "quality"))[:30]
+                        reason = str(r.get("rejected_reason") or r.get("reason") or "quality_gate")[:30]
                         reasons[reason] += 1
                         c = r.get("confidence", 0)
                         if isinstance(c, (int, float)):
