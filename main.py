@@ -908,6 +908,9 @@ class CandleHunterSignalBot:
                 try:
                     df_smc = self.fetcher.fetch_ohlcv("15m", limit=120)
                     smc_min = int(os.getenv("SMC_MIN_CONFLUENCE", "3"))
+                    # قاعدة الثقة العالية: إشارة ≥90% تحتاج SMC 2/6 فقط (بدل 3/6)
+                    if _conf_int >= int(os.getenv("SMC_HIGH_CONF_RELAX", "90")):
+                        smc_min = min(smc_min, 2)
                     gate = self.smc.directional_gate(df_smc, sig_dir, smc_min)
                     if not gate["passed"]:
                         logger.info(f"🧠 SMC gate: {signal.get('strategy_name')} {sig_dir} confluence {gate['score']}/{gate.get('max', 6)} < {smc_min} — not published")
@@ -916,7 +919,7 @@ class CandleHunterSignalBot:
                             reason=f"SMC confluence {gate['score']}/{gate.get('max', 6)} < {smc_min} ({gate.get('reason', '')})"
                         )
                         continue
-                    logger.info(f"🧠 SMC gate passed: {sig_dir} confluence {gate['score']}/{gate.get('max', 6)}")
+                    logger.info(f"🧠 SMC gate passed: {sig_dir} confluence {gate['score']}/{gate.get('max', 6)} (min={smc_min})")
                 except Exception as e:
                     logger.warning(f"SMC gate check failed (fail-open): {e}")
 
