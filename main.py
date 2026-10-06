@@ -997,6 +997,23 @@ class CandleHunterSignalBot:
                     self.channel_manager.record_signal(channel, signal)
                     self.signal_history.append({**signal, "channel": channel})
                     sent_directions.add(sig_dir)
+                    # 🔔 تنبيه مباشر للمالك (مرة واحدة لكل إشارة) — مستقل عن workflows
+                    if not signal.get("_owner_notified"):
+                        signal["_owner_notified"] = True
+                        try:
+                            _d = "شراء 🟢" if signal.get("signal_type") == "BUY" else "بيع 🔴"
+                            _msg = (
+                                f"🔔 <b>توصية جديدة نزلت على القناة</b>\n"
+                                f"⚡ XAU/USD — {_d}\n"
+                                f"📈 دخول: <b>{signal.get('entry_price', 0):.2f}</b>\n"
+                                f"🎯 TP1: {signal.get('take_profit_1', 0):.2f} | TP2: {signal.get('take_profit_2', 0):.2f}\n"
+                                f"🛑 SL: {signal.get('stop_loss', 0):.2f}\n"
+                                f"🧠 {signal.get('strategy_name', '?')} | ثقة {signal.get('confidence', 0):.0f}% | {channel}"
+                            )
+                            await self.bot.send_message(chat_id=ADMIN_ID, text=_msg, parse_mode='HTML')
+                            logger.info("🔔 Owner DM alert sent")
+                        except Exception as _oe:
+                            logger.warning(f"Owner DM alert failed: {_oe}")
                     # ⏱️ Record cooldown
                     self.cooldown.record_signal()
                     # 🧠 Record to adaptive learning
